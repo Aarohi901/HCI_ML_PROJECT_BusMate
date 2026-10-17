@@ -19,6 +19,7 @@ dist-ssr/
 build/
 .next/
 .cache/
+.vite/
 
 # Local SQLite / Logs / Performance test outputs
 *.db
