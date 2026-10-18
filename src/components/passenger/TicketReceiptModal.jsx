@@ -12,11 +12,14 @@ import {
   QrCode, 
   ArrowRight, 
   User,
-  Share2
+  Share2,
+  Award
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAccessibility } from '../../context/AccessibilityContext';
 import { useTranslation } from '../../context/TranslationContext';
+import { TRIP_PURPOSES } from '../../utils/priorityScoring';
+import { BookingStatusExplanation } from './BookingStatusExplanation';
 
 export const TicketReceiptModal = ({ 
   booking, 
@@ -28,6 +31,16 @@ export const TicketReceiptModal = ({
   const { t } = useTranslation();
 
   if (!isOpen || !booking) return null;
+
+  const tripPurposeKey = booking.tripPurpose || booking.passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+  const purposeObj = TRIP_PURPOSES[tripPurposeKey] || {
+    label: tripPurposeKey === 'MEDICAL' ? 'Medical / Doctor Visit' :
+           tripPurposeKey === 'WORK_COMMUTE' ? 'Work / Office Commute' :
+           tripPurposeKey === 'EDUCATION_EXAM' ? 'Student / College / Exam Travel' : 'General / Personal Trip',
+    icon: tripPurposeKey === 'MEDICAL' ? '🏥' : (tripPurposeKey === 'EDUCATION_EXAM' ? '🎓' : (tripPurposeKey === 'WORK_COMMUTE' ? '💼' : '🚶'))
+  };
+  const isHighPriority = Boolean(booking.priorityScore >= 70 || booking.isHighPriority);
+  const priorityScore = booking.priorityScore ?? (isHighPriority ? 75 : 15);
 
   const handlePrint = () => {
     announce('Opening print dialogue for bus ticket');
@@ -43,6 +56,10 @@ export const TicketReceiptModal = ({
 PNR: ${booking.pnr}
 Date: ${booking.bookingDate || new Date().toLocaleDateString()}
 Status: Confirmed / Paid
+
+PRIORITY ALLOCATION:
+Travel Purpose: ${purposeObj.label}
+Priority Status: ${isHighPriority ? 'High Priority Passenger' : 'Standard Commuter'} (Score: ${priorityScore} pts)
 
 SERVICE DETAILS:
 Route: ${booking.routeNumber}
@@ -120,6 +137,9 @@ Contact Phone: ${booking.contactPhone || 'N/A'}
           </button>
         </div>
 
+        {/* HCI Passenger-Facing Allocation Explanation & Evaluation Card */}
+        <BookingStatusExplanation booking={booking} />
+
         {/* Ticket Header Banner */}
         <div className="bg-gradient-to-r from-[#075985] to-[#0F766E] text-white p-6 rounded-2xl shadow-md space-y-3">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
@@ -180,6 +200,30 @@ Contact Phone: ${booking.contactPhone || 'N/A'}
                 <Clock className="w-3.5 h-3.5" />
                 <span>Estimated: {booking.droppingTime || '18:15'}</span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Dedicated Priority Status & Travel Purpose Field */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-gradient-to-r from-sky-50 to-emerald-50 rounded-2xl border border-sky-200">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{purposeObj.icon || '🚌'}</span>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Travel Purpose</span>
+              <span id="ticket-modal-travel-purpose" className="text-sm font-black text-slate-900">{purposeObj.label}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 sm:justify-end">
+            <div className="sm:text-right">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Priority Status</span>
+              <span id="ticket-modal-priority-status" className={`text-xs font-black px-2.5 py-1 rounded-lg border inline-flex items-center gap-1 ${
+                isHighPriority
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : 'bg-slate-100 text-slate-700 border-slate-300'
+              }`}>
+                {isHighPriority ? <Award className="w-3.5 h-3.5 text-emerald-700" /> : <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />}
+                <span>{isHighPriority ? 'High Priority Passenger' : 'Standard Commuter'} ({priorityScore} pts)</span>
+              </span>
             </div>
           </div>
         </div>

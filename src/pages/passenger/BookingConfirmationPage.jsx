@@ -19,11 +19,16 @@ import {
   PhoneCall,
   Mail,
   AlertTriangle,
-  FileText
+  FileText,
+  Award,
+  HeartPulse,
+  Accessibility
 } from 'lucide-react';
 import { useAccessibility } from '../../context/AccessibilityContext';
 import { useTranslation } from '../../context/TranslationContext';
 import { OperatorBadge } from '../../components/passenger/OperatorBadge';
+import { TRIP_PURPOSES, isReservedPrioritySeat } from '../../utils/priorityScoring';
+import { BookingStatusExplanation } from '../../components/passenger/BookingStatusExplanation';
 
 /**
  * 2. Dedicated Confirmation View & Printable PDF / E-Ticket View
@@ -119,6 +124,16 @@ export const BookingConfirmationPage = () => {
     window.print();
   };
 
+  const tripPurposeKey = booking.tripPurpose || booking.passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+  const purposeObj = TRIP_PURPOSES[tripPurposeKey] || {
+    label: tripPurposeKey === 'MEDICAL' ? 'Medical / Doctor Visit' :
+           tripPurposeKey === 'WORK_COMMUTE' ? 'Work / Office Commute' :
+           tripPurposeKey === 'EDUCATION_EXAM' ? 'Student / College / Exam Travel' : 'General / Personal Trip',
+    icon: tripPurposeKey === 'MEDICAL' ? '🏥' : (tripPurposeKey === 'EDUCATION_EXAM' ? '🎓' : (tripPurposeKey === 'WORK_COMMUTE' ? '💼' : '🚶'))
+  };
+  const isHighPriority = Boolean(booking.priorityScore >= 70 || booking.isHighPriority);
+  const priorityScore = booking.priorityScore ?? (isHighPriority ? 75 : 15);
+
   const handleDownload = () => {
     announce('Downloading E-Ticket receipt file');
     const ticketText = `
@@ -129,6 +144,10 @@ PNR Reference     : ${booking.pnr}
 Booking ID        : ${booking.bookingId || 'BK-2026-9921'}
 Booking Date & Time: ${booking.bookingDate || new Date().toLocaleDateString()} at ${booking.bookingTime || '14:25 IST'}
 Status            : ${booking.status || 'CONFIRMED'} (Paid)
+
+PRIORITY ALLOCATION & PURPOSE:
+Travel Purpose    : ${purposeObj.label}
+Priority Status   : ${isHighPriority ? 'High Priority Passenger' : 'Standard Commuter'} (Score: ${priorityScore} pts)
 
 TRANSIT JOURNEY DETAILS:
 Route             : ${booking.routeNumber}
@@ -246,6 +265,34 @@ Thank you for commuting with BusMate! Have a safe and timely trip!
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
+      </div>
+
+      {/* ========================================================
+          HCI ALLOCATION EXPLANATION & A/B TRANSPARENCY CARD
+          Answers: Was I allocated a seat? Why? & Evaluates trust
+          ======================================================== */}
+      <div className="print:hidden no-print">
+        <BookingStatusExplanation 
+          booking={booking} 
+          onAcceptReallocation={(details) => {
+            setBooking(prev => ({
+              ...prev,
+              status: 'Confirmed',
+              seats: [details?.assignedSeat || '2A'],
+              passengers: (prev.passengers || []).map(p => ({ ...p, seatId: details?.assignedSeat || '2A' })),
+              routeNumber: details?.assignedBusName || 'Route 5 at 17:40 (Adjacent Bus)',
+              boardingTime: details?.assignedBusTime || '17:40'
+            }));
+          }}
+          onRevertToWaitlist={(details) => {
+            setBooking(prev => ({
+              ...prev,
+              status: 'Waitlisted',
+              boardingTime: details?.originalBusTime || '17:30',
+              routeNumber: `Route 5 (${details?.originalBusTime || '17:30'} Departure - Standby Waitlist #2)`
+            }));
+          }}
+        />
       </div>
 
       {/* ========================================================
@@ -411,6 +458,53 @@ Thank you for commuting with BusMate! Have a safe and timely trip!
           </div>
         </div>
 
+        {/* DEDICATED PRIORITY ALLOCATION & TRAVEL PURPOSE FIELD */}
+        <div className="p-5 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-sky-50 via-emerald-50/50 to-amber-50/40">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            
+            {/* Dedicated Field: Travel Purpose */}
+            <div className="flex items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="w-12 h-12 rounded-xl bg-sky-100 flex items-center justify-center text-2xl shrink-0">
+                {purposeObj.icon || '🚌'}
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Travel Purpose
+                </span>
+                <span id="ticket-travel-purpose" className="text-base font-extrabold text-slate-900 block">
+                  {purposeObj.label}
+                </span>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  Verified Commuter Travel Reason
+                </span>
+              </div>
+            </div>
+
+            {/* Dedicated Field: Priority Status */}
+            <div className="flex items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
+                isHighPriority ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {isHighPriority ? <Award className="w-6 h-6 text-emerald-600" /> : <ShieldCheck className="w-6 h-6 text-slate-500" />}
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Priority Status
+                </span>
+                <span id="ticket-priority-status" className={`text-base font-extrabold block ${
+                  isHighPriority ? 'text-emerald-700' : 'text-slate-800'
+                }`}>
+                  {isHighPriority ? 'High Priority Passenger' : 'Standard Commuter'}
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  Composite Score: {priorityScore} pts • {isHighPriority ? 'Front Reserved Seating Verified' : 'Standard Transit Access'}
+                </span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         {/* PASSENGER & SEAT MANIFEST TABLE + SVG QR PASS */}
         <div className="p-6 sm:p-8 grid grid-cols-1 md:grid-cols-12 gap-8 border-b border-slate-200">
           
@@ -446,8 +540,13 @@ Thank you for commuting with BusMate! Have a safe and timely trip!
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="inline-block px-2.5 py-0.5 rounded-lg bg-sky-50 text-[#075985] font-bold border border-sky-200 tabular-nums">
-                          Seat {p.seatId} <span className="font-normal text-[10px] text-slate-500">({p.deck === 'upper' ? 'Upper' : 'Lower'} Deck)</span>
+                          Seat {p.seatId}
                         </span>
+                        {(isReservedPrioritySeat(p.seatId) || booking.isPrioritySeat) && (
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-300 font-bold text-[10px]">
+                            ★ Priority
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right">
                         <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">

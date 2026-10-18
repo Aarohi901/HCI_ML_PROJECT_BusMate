@@ -12,21 +12,19 @@ import { useAccessibility } from '../../context/AccessibilityContext';
 import { useTranslation } from '../../context/TranslationContext';
 
 const POPULAR_TERMINALS = [
-  { city: 'Pune', terminal: 'Swargate, Pune', landmark: 'Major Intercity Terminal' },
-  { city: 'Pune', terminal: 'Railway Station, Pune', landmark: 'Central Station Hub' },
-  { city: 'Pune', terminal: 'Katraj, Pune', landmark: 'South Corridor Bus Stand' },
-  { city: 'Pune', terminal: 'Shivajinagar, Pune', landmark: 'Suburban & Metro Hub' },
-  { city: 'Pune', terminal: 'Hinjawadi Phase 1, Pune', landmark: 'IT Park Express Stop' },
-  { city: 'Pune', terminal: 'Hadapsar Gadital, Pune', landmark: 'East Pune Terminal' },
-  { city: 'Pune', terminal: 'Vimannagar / Airport, Pune', landmark: 'Airport Transit Junction' },
-  { city: 'Pune', terminal: 'Kothrud Depot, Pune', landmark: 'West Corridor Depot' },
-  { city: 'Pune', terminal: 'IIIT Pune Campus', landmark: 'Academic Shuttle Quad' },
-  { city: 'Pune', terminal: 'Talegaon Railway Station', landmark: 'Suburban Link' },
+  { city: 'IIIT Pune', terminal: 'IIIT Pune Campus (Main Gate)', landmark: 'Campus Terminus & Admin Block' },
+  { city: 'Talegaon Route', terminal: 'L&T Circle', landmark: 'Industrial Highway Junction' },
+  { city: 'Talegaon Route', terminal: 'Restaurant Chain', landmark: 'Student Food Plaza' },
+  { city: 'Talegaon Route', terminal: 'Medical Store', landmark: 'Pharmacy & Wellness Centre' },
+  { city: 'Talegaon Route', terminal: 'Godavari Boys Hostel (Off-Campus Terminus & Railway Station Connection Point)', landmark: 'Godavari Boys Off-Campus Residence' },
+  { city: 'Talegaon Route', terminal: 'Hospital', landmark: 'General Health Care Hospital' },
+  { city: 'Talegaon Route', terminal: 'Laptop Service Centre', landmark: 'IT Hardware Hub' },
+  { city: 'Talegaon Route', terminal: 'Talegaon Station', landmark: 'Railway Station Central Platform' },
 ];
 
 export const BusSearchRibbon = ({ 
-  initialFrom = 'Swargate, Pune', 
-  initialTo = 'Railway Station, Pune', 
+  initialFrom = 'IIIT Pune Campus (Main Gate)', 
+  initialTo = 'Godavari Boys Hostel (Off-Campus Terminus & Railway Station Connection Point)', 
   onSearch 
 }) => {
   const { announce } = useAccessibility();

@@ -20,6 +20,9 @@ import { useAccessibility } from '../../context/AccessibilityContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTranslation } from '../../context/TranslationContext';
 import { bookSeatsForBus } from '../../services/inventoryService';
+import { PassengerDetailsForm } from '../../components/passenger/PassengerDetailsForm';
+import { calculatePriorityScore, isReservedPrioritySeat, TRIP_PURPOSES } from '../../utils/priorityScoring';
+import { evaluateScheduleAllocation } from '../../utils/allocationEngine';
 
 export const CheckoutPage = () => {
   const navigate = useNavigate();
@@ -81,6 +84,9 @@ export const CheckoutPage = () => {
     `idemp_sb_live_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
   );
 
+  // Error message for backend 422 rejections
+  const [errorMsg, setErrorMsg] = useState('');
+
   // Initialize passenger list based on reserved seats
   useEffect(() => {
     if (reservationData?.seats) {
@@ -89,8 +95,10 @@ export const CheckoutPage = () => {
           seatId: seat.id,
           deck: seat.deck || 'lower',
           name: index === 0 ? (user?.name || 'Alex Rivera') : `Passenger ${index + 1}`,
-          age: index === 0 ? 24 : 26,
-          gender: index === 0 ? 'Female' : 'Male'
+          age: index === 0 ? (reservationData?.passengerAge || 24) : 26,
+          gender: index === 0 ? 'Female' : 'Male',
+          tripPurpose: index === 0 ? (reservationData?.tripPurpose || 'GENERAL_LEISURE') : 'GENERAL_LEISURE',
+          isDivyang: index === 0 ? Boolean(reservationData?.isDivyang) : false
         }))
       );
     }
@@ -193,8 +201,37 @@ export const CheckoutPage = () => {
       return;
     }
 
+    setErrorMsg('');
     setIsProcessing(true);
     announce('Processing simulated payment transaction...');
+
+    const primaryPassenger = passengers[0] || {};
+    const primaryAge = Number(primaryPassenger.age) || reservationData?.passengerAge || 24;
+    const primaryPurpose = primaryPassenger.tripPurpose || reservationData?.tripPurpose || 'GENERAL_LEISURE';
+    const primaryDivyang = Boolean(primaryPassenger.isDivyang ?? reservationData?.isDivyang);
+
+    const priorityResult = calculatePriorityScore({
+      age: primaryAge,
+      tripPurpose: primaryPurpose,
+      isDivyang: primaryDivyang
+    });
+
+    const hasPrioritySeat = seats.some(s => isReservedPrioritySeat(typeof s === 'string' ? s : s.id));
+
+    const isFlexibleOptIn = Boolean(primaryPassenger.isFlexible);
+    const flexibleWindow = Number(primaryPassenger.flexibleWindowMinutes) || (isFlexibleOptIn ? 30 : 0);
+    const flexDirection = primaryPassenger.flexibilityDirection || 'ANY';
+
+    const flexibilityResult = evaluateScheduleAllocation({
+      requestedTime: boarding?.time || bus.departureTime || '17:30',
+      requestedSeat: typeof seats[0] === 'string' ? seats[0] : seats[0]?.id || '1C',
+      isFullCapacity: Boolean(reservationData?.isFullCapacity || bus.availableSeats === 0),
+      priorityScore: priorityResult.score,
+      isHighPriority: priorityResult.isHighPriority,
+      isFlexible: isFlexibleOptIn,
+      flexibleWindowMinutes: flexibleWindow,
+      flexibilityDirection: flexDirection
+    });
 
     const pnrNumber = `SB-${Math.floor(1000000 + Math.random() * 9000000)}`;
     const bookingRecord = {
@@ -202,19 +239,45 @@ export const CheckoutPage = () => {
       userId: user?.id || 'usr_guest',
       userName: user?.name || passengers[0]?.name || 'Commuter',
       busId: bus.id,
-      routeNumber: bus.routeNumber,
+      routeNumber: flexibilityResult.wasReallocated ? (flexibilityResult.assignedBusName || bus.routeNumber) : bus.routeNumber,
       busPlate: bus.busPlate || 'MH 14 BT 3312',
       operator: bus.operator || 'SmartBus City Transit',
       origin: bus.origin,
       destination: bus.destination,
       boardingPoint: boarding?.name,
       boardingPointLandmark: boarding?.landmark || 'Platform 3',
-      boardingTime: boarding?.time,
+      boardingTime: flexibilityResult.assignedBusTime || boarding?.time,
       droppingPoint: dropping?.name,
       droppingPointLandmark: dropping?.landmark || 'Central Station Gate',
       droppingTime: dropping?.time,
-      seats: seats.map(s => s.id),
+      seats: flexibilityResult.wasReallocated ? [flexibilityResult.assignedSeat || '2A'] : seats.map(s => (typeof s === 'string' ? s : s.id)),
       passengers,
+      // Student MIS & Operational Profile fields
+      misNumber: user?.misNumber || '112603001',
+      hostel: user?.hostel || 'GODAVARI',
+      roomNumber: user?.roomNumber || 'G-214',
+      course: user?.course || 'B.Tech',
+      batch: user?.batch || '2026-2030',
+      branch: user?.branch || 'AIDS',
+      canTravelStanding: passengers[0]?.canTravelStanding ?? (user?.canTravelStanding !== false),
+      declaredAccessibilityNeed: Boolean(passengers[0]?.declaredAccessibilityNeed || passengers[0]?.isDivyang || user?.declaredAccessibilityNeed),
+      tripId: bus?.tripId || bus?.id || 'T7',
+      tripReason: primaryPurpose,
+      tripPurpose: primaryPurpose,
+      priorityScore: priorityResult.score,
+      isPrioritySeat: hasPrioritySeat,
+      isHighPriority: priorityResult.isHighPriority,
+      priorityTier: priorityResult.tier,
+      // Schedule Flexibility fields
+      isFlexible: isFlexibleOptIn,
+      flexibleWindowMinutes: flexibleWindow,
+      acceptableWindowMinutes: flexibleWindow,
+      flexibilityDirection: flexDirection,
+      wasReallocated: flexibilityResult.wasReallocated,
+      reallocationReason: flexibilityResult.reallocationReason,
+      originalBusTime: flexibilityResult.originalBusTime,
+      assignedBusTime: flexibilityResult.assignedBusTime,
+      assignedBusName: flexibilityResult.assignedBusName,
       contactEmail,
       contactPhone,
       fareBreakdown: {
@@ -226,18 +289,24 @@ export const CheckoutPage = () => {
       paymentMethod: paymentMethod === 'upi' ? 'Paid via UPI (Instant Sandbox)' : 'Paid via Card (Sandbox)',
       idempotencyToken,
       bookingDate: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
-      status: 'Confirmed'
+      status: flexibilityResult.wasReallocated ? 'REALLOCATED' : 'Confirmed'
     };
 
     try {
-      // Backend confirmation attempt
-      await fetch('/api/bookings/confirm', {
+      // Backend confirmation attempt with 422 validation
+      const confirmResponse = await fetch('/api/bookings/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bookingRecord)
-      }).catch(err => {
-        console.warn('[SmartBus] API confirm offline, proceeding with local persistence:', err);
       });
+
+      if (confirmResponse.status === 422) {
+        const errorData = await confirmResponse.json().catch(() => ({}));
+        setErrorMsg(errorData.message || 'Priority seating validation failed: Insufficient priority score for reserved seating.');
+        setIsProcessing(false);
+        announce('Booking rejected: Insufficient priority eligibility for reserved seating.');
+        return;
+      }
     } catch (err) {
       console.warn('[SmartBus] Confirmation error caught:', err);
     }
@@ -322,6 +391,20 @@ export const CheckoutPage = () => {
           </span>
         </div>
 
+        {errorMsg && (
+          <div 
+            id="checkout-error-banner"
+            className="p-4 bg-red-50 border-2 border-red-400 text-red-900 rounded-2xl flex items-center gap-3 animate-in fade-in"
+            role="alert"
+          >
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <span className="font-bold text-xs block">Priority Seating Allocation Rejection (HTTP 422)</span>
+              <span className="text-xs font-medium">{errorMsg}</span>
+            </div>
+          </div>
+        )}
+
         {timerExpired ? (
           <div className="text-center py-8 space-y-3">
             <button
@@ -369,55 +452,23 @@ export const CheckoutPage = () => {
                 </div>
               )}
 
-              <div className="space-y-3">
+              {/* Passenger Multi-Factor Details & Purpose Forms */}
+              <div className="space-y-4">
                 {passengers.map((p, idx) => (
-                  <div key={p.seatId} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                    <div className="sm:col-span-3">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{t('Seat Assigned') || 'Seat Assigned'}</span>
-                      <span className="font-semibold text-sm text-[#075985] tabular-nums">{t('ticket.seat_number') || 'Seat'} {p.seatId} ({p.deck} deck)</span>
-                    </div>
-
-                    <div className="sm:col-span-4">
-                      <label className="text-[10px] font-medium text-slate-500 uppercase block sm:hidden" data-i18n="fullName">{t('fullName')}</label>
-                      <input
-                        type="text"
-                        required
-                        data-i18n-placeholder="fullName"
-                        placeholder={t('fullName')}
-                        value={p.name}
-                        onChange={(e) => updatePassenger(idx, 'name', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-normal text-slate-900 focus:outline-none focus:border-[#075985]"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="text-[10px] font-medium text-slate-500 uppercase block sm:hidden" data-i18n="age">{t('age')}</label>
-                      <input
-                        type="number"
-                        required
-                        min="5"
-                        max="99"
-                        data-i18n-placeholder="age"
-                        placeholder={t('age')}
-                        value={p.age}
-                        onChange={(e) => updatePassenger(idx, 'age', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-normal tabular-nums text-slate-900 focus:outline-none focus:border-[#075985]"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-3">
-                      <label className="text-[10px] font-medium text-slate-500 uppercase block sm:hidden" data-i18n="gender">{t('gender')}</label>
-                      <select
-                        value={p.gender}
-                        onChange={(e) => updatePassenger(idx, 'gender', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-normal text-slate-900 focus:outline-none focus:border-[#075985]"
-                      >
-                        <option value="Female">{t('female')}</option>
-                        <option value="Male">{t('male')}</option>
-                        <option value="Other">{t('other')}</option>
-                      </select>
-                    </div>
-                  </div>
+                  <PassengerDetailsForm
+                    key={p.seatId || idx}
+                    passengerIndex={idx}
+                    passenger={p}
+                    studentProfile={user}
+                    selectedTrip={reservationData?.bus}
+                    onChange={(updated) => {
+                      setPassengers(prev => {
+                        const copy = [...prev];
+                        copy[idx] = updated;
+                        return copy;
+                      });
+                    }}
+                  />
                 ))}
               </div>
 
@@ -590,6 +641,7 @@ export const CheckoutPage = () => {
             {/* Pay Button */}
             <button
               type="submit"
+              id="checkout-pay-btn"
               disabled={isProcessing}
               className="w-full py-4 bg-[#075985] hover:bg-[#0C4A6E] active:scale-[0.99] text-white font-semibold text-sm uppercase tracking-wide rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 focus:outline-none focus:ring-4 focus:ring-sky-300 disabled:opacity-50"
             >

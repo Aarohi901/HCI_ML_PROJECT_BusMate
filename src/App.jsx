@@ -18,9 +18,6 @@ import { HelpFeedbackPage } from './pages/passenger/HelpFeedbackPage';
 import { CheckoutPage } from './pages/passenger/CheckoutPage';
 import { BookingConfirmationPage } from './pages/passenger/BookingConfirmationPage';
 
-// Dedicated ML Operations & Agent Dashboard
-import { AgentDashboardPage } from './pages/agent/AgentDashboardPage';
-
 // Internal Admin & ML Portal Pages
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
@@ -49,6 +46,7 @@ export function App() {
               <Route path="/find-bus" element={<FindBusPage />} />
               <Route path="/live-tracking" element={<LiveTrackingPage />} />
               <Route path="/my-trips" element={<MyTripsPage />} />
+              <Route path="/history" element={<MyTripsPage />} />
               <Route path="/how-it-works" element={<HowItWorksPage />} />
               <Route path="/help" element={<HelpFeedbackPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
@@ -57,13 +55,10 @@ export function App() {
               <Route path="/ticket/:pnr" element={<BookingConfirmationPage />} />
             </Route>
 
-          {/* 2. Dedicated Directly Accessible ML Dashboard Route (Kaggle Predictive Suite) */}
-          <Route path="/agent" element={<AgentDashboardPage />} />
-          <Route path="/admin/ml-dashboard" element={<AgentDashboardPage />} />
-
-          {/* Dedicated Operator Authentication Endpoints */}
+          {/* Dedicated Admin Authentication Endpoint */}
           <Route path="/admin/login" element={<AdminLoginPage />} />
-          <Route path="/agent/login" element={<AdminLoginPage />} />
+          <Route path="/agent/*" element={<Navigate to="/admin" replace />} />
+          <Route path="/admin/ml-dashboard" element={<Navigate to="/admin" replace />} />
 
           {/* 3. Internal Admin & Research Portal Workspace (Protected by AdminAuthGuard) */}
           <Route element={<AdminLayout />}>

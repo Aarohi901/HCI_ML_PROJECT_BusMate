@@ -110,18 +110,6 @@ export const PassengerFooter = () => {
             <Link to="/help" className="hover:text-slate-300" data-i18n="footer.terms">
               {t('footer.terms')}
             </Link>
-            <span className="text-slate-700">|</span>
-            {/* Discrete, unindexed staff/agent portal link */}
-            <Link 
-              to="/agent" 
-              id="agent-portal-footer-link"
-              className="inline-flex items-center gap-1 text-slate-500 hover:text-sky-400 transition-colors"
-              title="Staff & ML Analytics Operations Portal"
-              rel="nofollow"
-            >
-              <Lock className="w-3 h-3" />
-              <span data-i18n="footer.staff_portal">{t('footer.staff_portal')}</span>
-            </Link>
           </div>
         </div>
 

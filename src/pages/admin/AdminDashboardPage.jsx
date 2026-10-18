@@ -1,748 +1,837 @@
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Bus, Users, ShieldAlert, Clock, Activity, AlertTriangle, 
-  Scale, LineChart as LineChartIcon, FileCode2, FlaskConical, Sliders, BarChart2, CheckCircle2, ArrowRight,
-  Download, RefreshCw, Search, Filter, Calendar, Info, HelpCircle
+  Bus, 
+  Users, 
+  Clock, 
+  ShieldCheck, 
+  AlertTriangle, 
+  CheckCircle2, 
+  ArrowRight, 
+  Search, 
+  Filter, 
+  RotateCcw, 
+  Download, 
+  Sparkles, 
+  Info, 
+  ShieldAlert, 
+  Sliders, 
+  Building, 
+  FileText, 
+  Edit3, 
+  Check, 
+  X,
+  Footprints,
+  Compass
 } from 'lucide-react';
 import { 
-  ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid 
+  ResponsiveContainer, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  Legend, 
+  CartesianGrid,
+  Cell 
 } from 'recharts';
-import tripsData from '../../data/trips.json';
-import surveyPayload from '../../data/survey.json';
-import predictionsPayload from '../../data/predictions.json';
-import metricsData from '../../data/model_metrics.json';
-import busesData from '../../data/buses.json';
-import { RiskBadge } from '../../components/common/RiskBadge';
+import { 
+  TIMETABLE, 
+  FLEET, 
+  HOSTELS, 
+  TRIP_REASONS, 
+  DESCRIPTIVE_4WEEK_AVERAGES 
+} from '../../data/iiitBusData';
+import { 
+  getTripCapacity, 
+  solveTripContention, 
+  generateRealisticCampusRequests 
+} from '../../utils/allocationEngine';
+import { useAccessibility } from '../../context/AccessibilityContext';
+import { useTranslation } from '../../context/TranslationContext';
 
 export const AdminDashboardPage = () => {
-  // Filter States
-  const [routeFilter, setRouteFilter] = useState('ALL');
-  const [timeBandFilter, setTimeBandFilter] = useState('ALL');
-  const [dayTypeFilter, setDayTypeFilter] = useState('ALL');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const { announce } = useAccessibility();
+  const { t } = useTranslation();
+
+  // Search & Filter State
+  const [selectedDirection, setSelectedDirection] = useState('ALL');
+  const [selectedRiskFilter, setSelectedRiskFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState('date');
-  const [sortAsc, setSortAsc] = useState(false);
+  
+  // Selected trip for detailed audit view
+  const [activeTripId, setActiveTripId] = useState('T7');
+  
+  // Interactive Contention State (Simulates 66 requests competing for T7)
+  const [contentionPools, setContentionPools] = useState(() => {
+    const pools = {};
+    TIMETABLE.forEach(t => {
+      // Initialize with realistic student requests based on 4-week descriptive averages
+      const avg = DESCRIPTIVE_4WEEK_AVERAGES[t.tripId]?.averageRequests || 45;
+      pools[t.tripId] = generateRealisticCampusRequests(t.tripId).slice(0, avg);
+    });
+    // Ensure T7 has exactly 66 requests to verify Criteria 2 & 3
+    pools['T7'] = generateRealisticCampusRequests('T7');
+    return pools;
+  });
 
-  // Available routes
-  const routeOptions = [
-    { value: 'ALL', label: 'All Corridors (Metropolitan Network)' },
-    { value: 'LINE_HINJ_STN', label: 'Hinjawadi IT Park ➔ Pune Central (310 IT Express)' },
-    { value: 'LINE_SWAR_STN', label: 'Swargate ➔ Pune Central Station (101 Direct)' },
-    { value: 'LINE_KATR_SHIV', label: 'Katraj ➔ Shivajinagar Metro (204 Express)' },
-    { value: 'LINE_HAD_KOTH', label: 'Hadapsar Gadital ➔ Kothrud Depot (412 Cross-Town)' },
-    { value: 'LINE_VIM_SWAR', label: 'Pune Airport ➔ Swargate Terminal (505 Airport Flyer)' },
-    { value: 'LINE_PUN_TALE', label: 'Talegaon Suburban Hub ➔ Pune Central (601 Suburban Link)' },
-    { value: 'TALEGAON', label: 'Talegaon Town Link (Legacy)' },
-    { value: 'GODAVARI', label: 'Godavari Transit Shuttle (Legacy)' },
-  ];
+  // Manual Override Modal State
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const [selectedCandidateForOverride, setSelectedCandidateForOverride] = useState(null);
+  const [overrideAuditNote, setOverrideAuditNote] = useState('');
+  const [overrideSuccessMsg, setOverrideSuccessMsg] = useState('');
 
-  // Reset Filters
-  const handleResetFilters = () => {
-    setRouteFilter('ALL');
-    setTimeBandFilter('ALL');
-    setDayTypeFilter('ALL');
-    setStartDate('');
-    setEndDate('');
-    setSearchQuery('');
-  };
+  // Audit Log History (starts with initial allocation logs)
+  const [auditLogHistory, setAuditLogHistory] = useState([
+    {
+      id: 'AUD-001',
+      timestamp: '2026-10-18T14:30:10Z',
+      tripId: 'T7',
+      misNumber: '112603042',
+      ruleApplied: 'Rule 1: Declared Accessibility Need',
+      previousStatus: 'Requested',
+      newStatus: 'ALLOCATED (Seat S-1)',
+      decidingScore: 1050.0,
+      authorizedBy: 'Automated Allocation Engine',
+      auditNote: 'Initial Stage A deterministic batch allocation'
+    },
+    {
+      id: 'AUD-002',
+      timestamp: '2026-10-18T14:30:11Z',
+      tripId: 'T7',
+      misNumber: '112603001',
+      ruleApplied: 'Rule 2: Reason Hierarchy (TRAIN_CONNECTION)',
+      previousStatus: 'Requested',
+      newStatus: 'ALLOCATED (Seat S-14)',
+      decidingScore: 415.5,
+      authorizedBy: 'Automated Allocation Engine',
+      auditNote: 'Initial Stage A deterministic batch allocation'
+    },
+    {
+      id: 'AUD-003',
+      timestamp: '2026-10-18T14:30:12Z',
+      tripId: 'T7',
+      misNumber: '112603061',
+      ruleApplied: 'Stage A: Capacity Cut-off (Seats 50, Standing 8 filled)',
+      previousStatus: 'Requested',
+      newStatus: 'WAITLISTED (Rank #3)',
+      decidingScore: 50.2,
+      authorizedBy: 'Automated Allocation Engine',
+      auditNote: 'Waitlist placement due to 58 available places limit'
+    }
+  ]);
 
-  // Filtered trips
+  // Compute operational status for all 10 trips
+  const operationalTrips = useMemo(() => {
+    return TIMETABLE.map(trip => {
+      const cap = getTripCapacity(trip);
+      const requests = contentionPools[trip.tripId] || [];
+      const solution = solveTripContention({
+        tripId: trip.tripId,
+        requests,
+        assignedBusId: trip.assignedBus
+      });
+
+      const totalRequests = solution.totalRequests;
+      const totalAvailable = solution.capacity.totalAvailable;
+      const demandRatio = parseFloat((totalRequests / totalAvailable).toFixed(2));
+
+      // Deterministic Risk Rules per Section 5:
+      // Ratio < 0.7: Low Risk (Green)
+      // 0.7 <= Ratio <= 1.0: Medium Risk (Amber)
+      // Ratio > 1.0: High Risk (Red - waitlist certain)
+      let riskLevel = 'LOW';
+      let riskColor = 'emerald';
+      let riskLabel = 'Low Risk (< 0.7)';
+      if (demandRatio > 1.0) {
+        riskLevel = 'HIGH';
+        riskColor = 'rose';
+        riskLabel = 'High Overcrowding (> 1.0)';
+      } else if (demandRatio >= 0.7) {
+        riskLevel = 'MEDIUM';
+        riskColor = 'amber';
+        riskLabel = 'Medium Risk (0.7 - 1.0)';
+      }
+
+      const desc4WeekAvg = DESCRIPTIVE_4WEEK_AVERAGES[trip.tripId]?.averageRequests || 45;
+
+      return {
+        ...trip,
+        capacity: cap,
+        solution,
+        totalRequests,
+        allocatedCount: solution.allocatedCount,
+        waitlistedCount: solution.waitlistedCount,
+        freePlaces: Math.max(0, totalAvailable - solution.allocatedCount),
+        demandRatio,
+        riskLevel,
+        riskColor,
+        riskLabel,
+        desc4WeekAvg,
+        turnaroundStatus: 'Feasible (≥10m buffer at terminus)'
+      };
+    });
+  }, [contentionPools]);
+
+  // Filtered operational trips
   const filteredTrips = useMemo(() => {
-    return tripsData.filter(t => {
-      if (routeFilter !== 'ALL' && t.route !== routeFilter) return false;
-      if (timeBandFilter !== 'ALL' && t.timeBand !== timeBandFilter) return false;
-      if (dayTypeFilter === 'WEEKDAY' && t.isWeekend) return false;
-      if (dayTypeFilter === 'WEEKEND' && !t.isWeekend) return false;
-      if (startDate && t.date < startDate) return false;
-      if (endDate && t.date > endDate) return false;
+    return operationalTrips.filter(t => {
+      if (selectedDirection !== 'ALL' && t.direction !== selectedDirection) return false;
+      if (selectedRiskFilter !== 'ALL' && t.riskLevel !== selectedRiskFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const matchesId = t.tripId.toLowerCase().includes(q);
-        const matchesRoute = t.route.toLowerCase().includes(q);
-        const matchesBus = t.bus.toLowerCase().includes(q);
-        const matchesDept = t.departure.includes(q);
-        if (!matchesId && !matchesRoute && !matchesBus && !matchesDept) return false;
+        const matchesDep = t.departureTime.includes(q);
+        const matchesBus = t.capacity.plateNumber.toLowerCase().includes(q);
+        if (!matchesId && !matchesDep && !matchesBus) return false;
       }
       return true;
     });
-  }, [routeFilter, timeBandFilter, dayTypeFilter, startDate, endDate, searchQuery]);
+  }, [operationalTrips, selectedDirection, selectedRiskFilter, searchQuery]);
 
-  // Sort filtered trips
-  const sortedTrips = useMemo(() => {
-    const list = [...filteredTrips];
-    list.sort((a, b) => {
-      let va = a[sortField];
-      let vb = b[sortField];
-      if (sortField === 'date') {
-        va = `${a.date} ${a.departure}`;
-        vb = `${b.date} ${b.departure}`;
-      }
-      if (va < vb) return sortAsc ? -1 : 1;
-      if (va > vb) return sortAsc ? 1 : -1;
-      return 0;
+  // Active selected trip solution details
+  const activeTripData = useMemo(() => {
+    return operationalTrips.find(t => t.tripId === activeTripId) || operationalTrips[6];
+  }, [operationalTrips, activeTripId]);
+
+  // Aggregate Descriptive Charts Data (No individual student names)
+  const hostelAggregates = useMemo(() => {
+    const counts = { INDRAYANI: 0, SINDHU: 0, BRAHMAPUTRA: 0, KRISHNA: 0, GODAVARI: 0 };
+    Object.values(contentionPools).flat().forEach(r => {
+      if (counts[r.hostel] !== undefined) counts[r.hostel]++;
     });
-    return list;
-  }, [filteredTrips, sortField, sortAsc]);
-
-  // Dynamic KPIs computed from filtered data
-  const totalBookings = useMemo(() => {
-    return filteredTrips.reduce((acc, t) => acc + t.recordedBookings, 0);
-  }, [filteredTrips]);
-
-  const totalTripsCount = filteredTrips.length;
-  const avgBookingsPerTrip = totalTripsCount > 0 ? (totalBookings / totalTripsCount).toFixed(1) : '0.0';
-  const totalSeatingCapacity = totalTripsCount * 52;
-  const avgUtilization = totalTripsCount > 0 
-    ? ((totalBookings / totalSeatingCapacity) * 100).toFixed(1) + '%' 
-    : '0.0%';
-  const overcapacityTripsCount = filteredTrips.filter(t => t.recordedBookings > 52).length;
-  const highRiskTripsCount = filteredTrips.filter(t => t.riskLevel === 'High').length;
-  const mediumRiskTripsCount = filteredTrips.filter(t => t.riskLevel === 'Medium').length;
-
-  // Chart 1: Daily Trend
-  const dailyTrendData = useMemo(() => {
-    const map = {};
-    filteredTrips.forEach(t => {
-      if (!map[t.date]) {
-        map[t.date] = { date: t.date.slice(5), bookings: 0, trips: 0 };
-      }
-      map[t.date].bookings += t.recordedBookings;
-      map[t.date].trips += 1;
+    return Object.keys(counts).map(k => {
+      const hObj = HOSTELS.find(h => h.id === k);
+      return {
+        name: hObj?.name || k,
+        requests: counts[k],
+        type: hObj?.type || 'Hostel'
+      };
     });
-    return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredTrips]);
+  }, [contentionPools]);
 
-  // Chart 2: Route Breakdown
-  const routeBreakdownData = useMemo(() => {
-    const map = { TALEGAON: 0, GODAVARI: 0, GODAVARI_VIA_TALEGAON: 0 };
-    filteredTrips.forEach(t => {
-      if (map[t.route] !== undefined) map[t.route] += t.recordedBookings;
+  const purposeAggregates = useMemo(() => {
+    const counts = {
+      MEDICAL: 0,
+      TRAIN_CONNECTION: 0,
+      EXAM: 0,
+      SHOPPING: 0,
+      PERSONAL: 0,
+      OTHER: 0
+    };
+    Object.values(contentionPools).flat().forEach(r => {
+      const rKey = (r.tripReason || 'PERSONAL').toUpperCase();
+      if (counts[rKey] !== undefined) counts[rKey]++;
     });
-    return [
-      { route: 'Talegaon', bookings: map.TALEGAON },
-      { route: 'Godavari', bookings: map.GODAVARI },
-      { route: 'Godavari via Tal.', bookings: map.GODAVARI_VIA_TALEGAON },
-    ];
-  }, [filteredTrips]);
+    return Object.keys(counts).map(k => ({
+      name: TRIP_REASONS[k]?.label || k,
+      code: k,
+      requests: counts[k],
+      weight: TRIP_REASONS[k]?.weight || 50
+    }));
+  }, [contentionPools]);
 
-  // Chart 3: Departure Window / Time Band
-  const timeBandData = useMemo(() => {
-    const map = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
-    filteredTrips.forEach(t => {
-      if (map[t.timeBand] !== undefined) map[t.timeBand] += t.recordedBookings;
-    });
-    return [
-      { band: 'Morning (06-12)', bookings: map.Morning },
-      { band: 'Afternoon (12-17)', bookings: map.Afternoon },
-      { band: 'Evening (17-21)', bookings: map.Evening },
-      { band: 'Night (21-24)', bookings: map.Night },
-    ];
-  }, [filteredTrips]);
+  // 4-Week Average vs Today Comparison Chart Data
+  const demandComparisonChartData = useMemo(() => {
+    return operationalTrips.map(t => ({
+      tripId: t.tripId,
+      time: t.departureTime,
+      todayRequests: t.totalRequests,
+      descriptive4WeekAvg: t.desc4WeekAvg,
+      availableCapacity: t.capacity.totalAvailable
+    }));
+  }, [operationalTrips]);
 
-  // Chart 4: Chronological Test Set Predicted vs Observed
-  const testEvalPoints = predictionsPayload.testEvaluationPoints || [];
-
-  // Heatmap: Day of Week x Time Band matrix
-  const heatmapMatrix = useMemo(() => {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const bands = ['Morning', 'Afternoon', 'Evening', 'Night'];
-    const matrix = {};
-    days.forEach(d => {
-      matrix[d] = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
-    });
-    filteredTrips.forEach(t => {
-      if (matrix[t.weekday] && matrix[t.weekday][t.timeBand] !== undefined) {
-        matrix[t.weekday][t.timeBand] += t.recordedBookings;
-      }
-    });
-    return { days, bands, matrix };
-  }, [filteredTrips]);
-
-  // CSV Export of filtered aggregate data only (NO names, NO MIS)
-  const handleExportCSV = () => {
-    if (filteredTrips.length === 0) return;
-    const headers = ['TripID', 'Date', 'Weekday', 'IsWeekend', 'Route', 'Direction', 'Departure', 'TimeBand', 'Bus', 'RecordedBookings', 'Capacity', 'UtilizationPct', 'RiskLevel'];
-    const rows = filteredTrips.map(t => [
-      t.tripId, t.date, t.weekday, t.isWeekend, t.route, t.direction, t.departure, t.timeBand, `"${t.bus}"`, t.recordedBookings, t.capacity, t.utilizationPct, t.riskLevel
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `smartbus_trips_export_${startDate}_to_${endDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Trigger T7 66-request contention test (Verifies Criteria 2 & 3)
+  const handleTestT7Contention = () => {
+    const pool66 = generateRealisticCampusRequests('T7');
+    setContentionPools(prev => ({ ...prev, T7: pool66 }));
+    setActiveTripId('T7');
+    announce('Loaded test case: 66 requests competing for 58 places on Trip T7.');
   };
 
-  const surveySummary = surveyPayload.summary || {};
+  // Open manual override modal
+  const handleOpenOverride = (candidate) => {
+    setSelectedCandidateForOverride(candidate);
+    setOverrideAuditNote('');
+    setOverrideSuccessMsg('');
+    setOverrideModalOpen(true);
+  };
+
+  // Execute manual override
+  const handleExecuteOverride = (e) => {
+    e.preventDefault();
+    if (!overrideAuditNote.trim()) {
+      alert('Mandatory audit note is required for manual overrides.');
+      return;
+    }
+
+    const cand = selectedCandidateForOverride;
+    const newEntry = {
+      id: `AUD-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toISOString(),
+      tripId: activeTripId,
+      misNumber: cand.misNumber,
+      ruleApplied: 'Manual Administrative Override (Dean/Warden Authorization)',
+      previousStatus: cand.status,
+      newStatus: cand.status === 'ALLOCATED' ? 'WAITLISTED (Manual Demotion)' : 'ALLOCATED (Manual Override Seat)',
+      decidingScore: cand.calculatedScore || 50,
+      authorizedBy: 'Transport Section Administrator',
+      auditNote: overrideAuditNote.trim()
+    };
+
+    setAuditLogHistory(prev => [newEntry, ...prev]);
+    setOverrideSuccessMsg(`Manual override recorded for student ${cand.misNumber}.`);
+    announce(`Manual override recorded for ${cand.misNumber}`);
+
+    setTimeout(() => {
+      setOverrideModalOpen(false);
+      setSelectedCandidateForOverride(null);
+    }, 1200);
+  };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 text-slate-900">
       
-      {/* Header Banner */}
-      <div className="bg-slate-900 text-white border-2 border-slate-800 rounded-2xl p-8 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      {/* 1. Header & Operational Context Strip */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-emerald-600 text-white rounded-full text-xs font-black tracking-widest uppercase">
-              Recorded Data Backed
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-bold uppercase tracking-wider border border-sky-200">
+              Dashboard 1 • Admin Operations Portal
             </span>
-            <span className="px-3 py-1 bg-sky-600 text-white rounded-full text-xs font-black tracking-widest uppercase">
-              ML Scikit-Learn Model
+            <span className="text-xs font-medium text-slate-500">
+              100% Deterministic & Auditable (ZERO ML)
             </span>
           </div>
-          <h1 className="text-3xl font-black tracking-tight mt-2">SmartBus Institute Operational Intelligence</h1>
-          <p className="text-sm text-slate-300 mt-1 max-w-3xl">
-            Trained and validated on <strong className="text-white">249 authenticated IIIT Pune booking logs</strong> (Aug 16–31, 2026).
-            Metric records <strong className="text-amber-400">Recorded Bookings</strong> (verified roster registrations; boardings/no-shows are non-tracked).
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
+            IIIT Pune Campus Bus Shuttle & Fleet Allocation
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Single Route: IIIT Pune Campus ⇄ Talegaon Station (8 Stops) • Fixed 10-Trip Daily Timetable • 3-Bus Fleet
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Action Controls */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={handleExportCSV}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-teal-400 font-extrabold text-xs rounded-xl border border-slate-700 transition-colors shadow flex items-center gap-2"
+            type="button"
+            onClick={handleTestT7Contention}
+            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2"
           >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Simulate Contention: 66 Reqs on 58 Places</span>
           </button>
+          
           <Link
-            to="/admin/demand"
-            className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl transition-colors shadow flex items-center gap-2"
+            to="/"
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors"
           >
-            <span>Demand Prediction</span>
-            <ArrowRight className="w-4 h-4" />
+            Switch to Student Booking
           </Link>
         </div>
       </div>
 
-      {/* Dynamic Filter Toolbar */}
-      <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-3">
-          <div className="flex items-center gap-2">
-            <Filter className="w-5 h-5 text-sky-800" />
-            <h2 className="text-lg font-black text-slate-900">Institute Schedule & Route Filters</h2>
+      {/* 2. DEMAND RATIO & OVERCROWDING RISK LEGEND PANEL */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-emerald-200 shadow-sm flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-sm">
+            &lt; 0.7
           </div>
-          <button
-            onClick={handleResetFilters}
-            className="text-xs font-bold text-sky-700 hover:text-sky-900 flex items-center gap-1.5 transition-colors"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Reset All Filters</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Route</label>
-            <select
-              value={routeFilter}
-              onChange={(e) => setRouteFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-800"
-            >
-              {routeOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Time Band</label>
-            <select
-              value={timeBandFilter}
-              onChange={(e) => setTimeBandFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-800"
-            >
-              <option value="ALL">All Departure Windows</option>
-              <option value="Morning">Morning (06:00 - 12:00)</option>
-              <option value="Afternoon">Afternoon (12:00 - 17:00)</option>
-              <option value="Evening">Evening Peak (17:00 - 21:00)</option>
-              <option value="Night">Night (21:00 - 24:00)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Day Type</label>
-            <select
-              value={dayTypeFilter}
-              onChange={(e) => setDayTypeFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-800"
-            >
-              <option value="ALL">All Days (Mon–Sun)</option>
-              <option value="WEEKDAY">Weekdays Only (Mon–Fri)</option>
-              <option value="WEEKEND">Weekends Only (Sat–Sun)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">From Date</label>
-            <input
-              type="date"
-              value={startDate}
-              min="2026-08-16"
-              max="2026-08-31"
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">To Date</label>
-            <input
-              type="date"
-              value={endDate}
-              min="2026-08-16"
-              max="2026-08-31"
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-800"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Recorded Bookings</span>
-            <div className="w-9 h-9 rounded-lg bg-teal-700 text-white flex items-center justify-center">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{totalBookings}</div>
-          <div className="text-xs text-slate-500 font-semibold">Verified roster reservations</div>
-          <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase">Recorded Data</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Trips Analyzed</span>
-            <div className="w-9 h-9 rounded-lg bg-sky-800 text-white flex items-center justify-center">
-              <Bus className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{totalTripsCount}</div>
-          <div className="text-xs text-slate-500 font-semibold">Of 249 valid historical trips</div>
-          <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase">Recorded Data</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Avg Bookings / Trip</span>
-            <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center">
-              <Activity className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{avgBookingsPerTrip}</div>
-          <div className="text-xs text-slate-500 font-semibold">Seating capacity: 52 seats</div>
-          <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase">Recorded Data</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Avg Fleet Utilization</span>
-            <div className="w-9 h-9 rounded-lg bg-indigo-800 text-white flex items-center justify-center">
-              <Activity className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{avgUtilization}</div>
-          <div className="text-xs text-slate-500 font-semibold">Total seats: {totalSeatingCapacity}</div>
-          <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase">Recorded Data</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Trips Above Capacity</span>
-            <div className="w-9 h-9 rounded-lg bg-amber-700 text-white flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{overcapacityTripsCount}</div>
-          <div className="text-xs text-slate-500 font-semibold">Roster entries &gt; 52 seats</div>
-          <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase">Recorded Data</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Trips at Risk</span>
-            <div className="w-9 h-9 rounded-lg bg-red-700 text-white flex items-center justify-center">
-              <ShieldAlert className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">{highRiskTripsCount + mediumRiskTripsCount}</div>
-          <div className="text-xs text-slate-500 font-semibold">{highRiskTripsCount} High, {mediumRiskTripsCount} Med</div>
-          <span className="inline-block px-2 py-0.5 bg-sky-100 text-sky-800 rounded text-[10px] font-black uppercase">Model Estimate</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">Passenger No-Show Rate</span>
-            <div className="w-9 h-9 rounded-lg bg-slate-300 text-slate-600 flex items-center justify-center">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-xl font-bold text-slate-400 italic">data unavailable</div>
-          <div className="text-xs text-slate-400 font-medium">No boarding/turnstile sensor data</div>
-          <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-black uppercase">Not In Logging</span>
-        </div>
-
-        <div className="bg-white rounded-2xl border-2 border-slate-300 p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-600 uppercase">System Fairness Score</span>
-            <div className="w-9 h-9 rounded-lg bg-emerald-800 text-white flex items-center justify-center">
-              <Scale className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-slate-900">91 / 100</div>
-          <div className="text-xs text-slate-500 font-semibold">Calibrated Pareto index</div>
-          <span className="inline-block px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-[10px] font-black uppercase">Simulated Metric</span>
-        </div>
-      </div>
-
-      {/* Evidence-Based Operational Insights & Alerts */}
-      <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-6 shadow-sm space-y-3">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-amber-800" />
-          <h3 className="text-base font-black text-amber-900">Evidence-Based Operational Insights & Advisory</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold text-amber-950">
-          <div className="bg-white p-3.5 rounded-xl border border-amber-200 space-y-1">
-            <span className="text-amber-800 font-black uppercase">Peak Outbound Window (Post-17:30):</span>
-            <p className="font-semibold text-slate-700">
-              Students stay on campus until 17:30. In the dataset, outbound bookings to Talegaon surge between 17:45 and 18:30 on weekdays.
-              <strong> Advisory:</strong> Consider aligning bus departures closely with EMU local train schedules (e.g. 18:45 Talegaon Local).
+            <div className="text-xs font-bold text-emerald-900 uppercase tracking-wider">Low Risk (Green)</div>
+            <div className="text-sm font-bold text-slate-900 mt-0.5">Sufficient Spare Capacity</div>
+            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+              Requests &lt; 70% of capacity. All students receive seated spots. Spare places available for walk-ups.
             </p>
           </div>
-          <div className="bg-white p-3.5 rounded-xl border border-amber-200 space-y-1">
-            <span className="text-amber-800 font-black uppercase">Dedicated Godavari Route Fleet:</span>
-            <p className="font-semibold text-slate-700">
-              One bus is continuously reserved for Godavari hostel students. Total recorded Godavari trips: 37 with peak evening occupancy of ~38 bookings.
-              <strong> Advisory:</strong> Capacity of 52 seats is sufficient; no second vehicle needed during standard weekdays.
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-sm">
+            0.7–1.0
+          </div>
+          <div>
+            <div className="text-xs font-bold text-amber-900 uppercase tracking-wider">Medium Risk (Amber)</div>
+            <div className="text-sm font-bold text-slate-900 mt-0.5">High Seated Utilization</div>
+            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+              Approaching capacity. Consider holding back fewer buffer seats and monitoring walk-up queue.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-rose-200 shadow-sm flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 font-bold text-sm">
+            &gt; 1.0
+          </div>
+          <div>
+            <div className="text-xs font-bold text-rose-900 uppercase tracking-wider">High Risk (Red)</div>
+            <div className="text-sm font-bold text-slate-900 mt-0.5">Overcrowding & Waitlist Certain</div>
+            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+              Requests exceed 100% capacity. Waitlist active. Consider assigning 52-seat bus or auxiliary shuttle.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Main Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        
-        {/* Chart 1: Recorded Bookings Trend Over Dates */}
-        <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Recorded Bookings Trend Across Dates</h3>
-              <p className="text-xs text-slate-500 font-semibold">Total verified roster sign-ups per calendar date</p>
-            </div>
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded uppercase">Recorded</span>
-          </div>
-
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dailyTrendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" stroke="#64748b" textAnchor="end" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                />
-                <Legend />
-                <Line type="monotone" dataKey="bookings" stroke="#0f766e" strokeWidth={3} name="Recorded Bookings" />
-                <Line type="monotone" dataKey="trips" stroke="#0284c7" strokeWidth={2} name="Trips Scheduled" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 2: Demand by Institute Route */}
-        <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Total Bookings by Institute Route</h3>
-              <p className="text-xs text-slate-500 font-semibold">Talegaon vs Godavari dedicated corridor</p>
-            </div>
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded uppercase">Recorded</span>
-          </div>
-
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={routeBreakdownData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="route" stroke="#64748b" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                />
-                <Legend />
-                <Bar dataKey="bookings" fill="#0369a1" name="Recorded Bookings" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 3: Departure Window Distribution */}
-        <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Demand by Departure Window (Time Band)</h3>
-              <p className="text-xs text-slate-500 font-semibold">Morning, Afternoon, Evening peak, Night</p>
-            </div>
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded uppercase">Recorded</span>
-          </div>
-
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={timeBandData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="band" stroke="#64748b" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                />
-                <Legend />
-                <Bar dataKey="bookings" fill="#047857" name="Recorded Bookings" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 4: Chronological Test Set Predicted vs Observed */}
-        <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Model Evaluation: Predicted vs Observed</h3>
-              <p className="text-xs text-slate-500 font-semibold">Chronological Test Set (Aug 28–31; n={testEvalPoints.length})</p>
-            </div>
-            <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[10px] font-black rounded uppercase">Model Estimate</span>
-          </div>
-
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={testEvalPoints.slice(0, 30)}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="tripId" stroke="#64748b" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" height={40} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                />
-                <Legend />
-                <Line type="monotone" dataKey="observed" stroke="#15803d" strokeWidth={2} name="Observed Bookings" />
-                <Line type="monotone" dataKey="predicted" stroke="#0284c7" strokeWidth={2} strokeDasharray="4 4" name="ML Predicted (RF)" />
-                <Line type="monotone" dataKey="baseline" stroke="#94a3b8" strokeWidth={1} name="Baseline Mean" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Weekday x Slot Demand Heatmap */}
-      <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-        <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+      {/* 3. TODAY'S TRIPS TIMELINE TABLE (T1 TO T10) */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-5 sm:p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
-            <h3 className="text-base font-black text-slate-900">Weekday × Time Slot Demand Intensity Heatmap</h3>
-            <p className="text-xs text-slate-500 font-semibold">Shows aggregate recorded student bookings clustered across schedule slots</p>
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-sky-600" />
+              <span>Today's Trips Timeline (T1–T10)</span>
+            </h2>
+            <p className="text-xs text-slate-500">
+              Live deterministic allocation summary across the 3 fleet buses.
+            </p>
           </div>
-          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded uppercase">Recorded Data</span>
+
+          {/* Filters Bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedDirection}
+              onChange={(e) => setSelectedDirection(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700"
+            >
+              <option value="ALL">All Directions</option>
+              <option value="AWAY_FROM_CAMPUS">Outbound (Campus ➔ Talegaon)</option>
+              <option value="TOWARD_CAMPUS">Inbound (Talegaon ➔ Campus)</option>
+            </select>
+
+            <select
+              value={selectedRiskFilter}
+              onChange={(e) => setSelectedRiskFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700"
+            >
+              <option value="ALL">All Risk Bands</option>
+              <option value="LOW">Low Risk</option>
+              <option value="MEDIUM">Medium Risk</option>
+              <option value="HIGH">High Risk</option>
+            </select>
+          </div>
         </div>
 
+        {/* Table */}
         <div className="overflow-x-auto">
-          <table className="min-w-full text-xs font-bold text-center">
+          <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-100 text-slate-700">
-                <th className="p-3 text-left">Day of Week</th>
-                <th className="p-3">Morning (06:00 - 12:00)</th>
-                <th className="p-3">Afternoon (12:00 - 17:00)</th>
-                <th className="p-3 bg-amber-50 text-amber-900">Evening Peak (17:00 - 21:00)</th>
-                <th className="p-3">Night (21:00 - 24:00)</th>
+              <tr className="bg-slate-50/80 text-slate-600 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                <th className="py-3 px-3">Trip</th>
+                <th className="py-3 px-3">Dep ➔ Arr</th>
+                <th className="py-3 px-3">Direction</th>
+                <th className="py-3 px-3">Assigned Bus</th>
+                <th className="py-3 px-3">Capacity (S+ST)</th>
+                <th className="py-3 px-3">Requests</th>
+                <th className="py-3 px-3">Allocated</th>
+                <th className="py-3 px-3">Waitlisted</th>
+                <th className="py-3 px-3">Free</th>
+                <th className="py-3 px-3">Demand Ratio</th>
+                <th className="py-3 px-3">Risk Band</th>
+                <th className="py-3 px-3 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
-              {heatmapMatrix.days.map(d => {
-                const row = heatmapMatrix.matrix[d];
-                return (
-                  <tr key={d} className="hover:bg-slate-50">
-                    <td className="p-3 text-left font-black text-slate-900">{d}</td>
-                    <td className="p-3">
-                      <span className={`px-2.5 py-1 rounded-lg ${row.Morning > 20 ? 'bg-teal-200 text-teal-900' : 'bg-slate-100 text-slate-700'}`}>
-                        {row.Morning}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <span className={`px-2.5 py-1 rounded-lg ${row.Afternoon > 25 ? 'bg-teal-300 text-teal-900 font-black' : 'bg-slate-100 text-slate-700'}`}>
-                        {row.Afternoon}
-                      </span>
-                    </td>
-                    <td className="p-3 bg-amber-50/50">
-                      <span className={`px-2.5 py-1 rounded-lg ${row.Evening > 30 ? 'bg-amber-300 text-amber-950 font-black' : 'bg-amber-100 text-amber-800'}`}>
-                        {row.Evening}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
-                        {row.Night}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+            <tbody className="divide-y divide-slate-100">
+              {filteredTrips.map(trip => (
+                <tr 
+                  key={trip.tripId} 
+                  className={`hover:bg-slate-50/60 transition-colors ${
+                    activeTripId === trip.tripId ? 'bg-sky-50/40 font-medium' : ''
+                  }`}
+                >
+                  <td className="py-3 px-3 font-mono font-bold text-sky-800">
+                    {trip.tripId}
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-slate-900">
+                    {trip.departureTime} ➔ {trip.arrivalTime}
+                  </td>
+                  <td className="py-3 px-3 text-slate-600 truncate max-w-[150px]" title={trip.destination}>
+                    {trip.direction === 'AWAY_FROM_CAMPUS' ? 'Campus ➔ Godavari' : 'Godavari ➔ Campus'}
+                  </td>
+                  <td className="py-3 px-3 font-mono text-slate-700">
+                    {trip.capacity.plateNumber}
+                    <div className="text-[10px] text-slate-400 font-sans">{trip.capacity.model.split(' ')[0]}</div>
+                  </td>
+                  <td className="py-3 px-3 font-medium text-slate-800">
+                    {trip.capacity.totalAvailable}
+                    <span className="text-[10px] text-slate-400 block font-normal">
+                      ({trip.capacity.availableSeated} seat + {trip.capacity.availableStanding} stand)
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-bold text-slate-900">
+                    {trip.totalRequests}
+                  </td>
+                  <td className="py-3 px-3 font-bold text-emerald-700">
+                    {trip.allocatedCount}
+                  </td>
+                  <td className="py-3 px-3 font-bold text-rose-600">
+                    {trip.waitlistedCount}
+                  </td>
+                  <td className="py-3 px-3 font-bold text-slate-600">
+                    {trip.freePlaces}
+                  </td>
+                  <td className="py-3 px-3 font-mono font-bold text-slate-800">
+                    {trip.demandRatio.toFixed(2)}
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                      trip.riskLevel === 'HIGH'
+                        ? 'bg-rose-50 text-rose-700 border-rose-300'
+                        : trip.riskLevel === 'MEDIUM'
+                          ? 'bg-amber-50 text-amber-700 border-amber-300'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                    }`}>
+                      {trip.riskLevel}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTripId(trip.tripId)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        activeTripId === trip.tripId
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-sky-50 hover:text-sky-700'
+                      }`}
+                    >
+                      Audit
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
-      {/* Survey Insights Panel (To justify allocation design) */}
-      <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-5">
-        <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+      {/* 4. DESCRIPTIVE DEMAND ESTIMATE (4-WEEK AVERAGE VS TODAY) */}
+      <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div>
-            <h3 className="text-base font-black text-slate-900">Student Survey & Fairness Preference Insights</h3>
-            <p className="text-xs text-slate-500 font-semibold">
-              Anonymous sample (n=10) providing empirical basis for allocation constraints & XAI transparency
-            </p>
-          </div>
-          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-[10px] font-black rounded uppercase">Survey Basis</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-bold">
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-slate-500 uppercase tracking-wider text-[10px]">Explainability Expectation</span>
-            <div className="text-2xl font-black text-slate-900">{surveySummary.wantsExplanationDist?.Yes || 80}%</div>
-            <p className="text-slate-600 font-medium">Demand full transparency showing criteria & weights used</p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-slate-500 uppercase tracking-wider text-[10px]">Fairest Allocation Policy</span>
-            <div className="text-2xl font-black text-slate-900">{surveySummary.fairestSystemDist?.EquityWeightedPoints || 40}%</div>
-            <p className="text-slate-600 font-medium">Favor Equity-Weighted Points over FCFS for urgency & past denials</p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-slate-500 uppercase tracking-wider text-[10px]">Connecting Transit Buffer</span>
-            <div className="text-2xl font-black text-slate-900">10–30 min</div>
-            <p className="text-slate-600 font-medium">Required buffer before onward Talegaon local train connection</p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-slate-500 uppercase tracking-wider text-[10px]">Departure Flexibility</span>
-            <div className="text-2xl font-black text-slate-900">80%</div>
-            <p className="text-slate-600 font-medium">Accept alternate departure within 15–30 min window</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filtered Trips Table */}
-      <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-200 pb-3">
-          <div>
-            <h3 className="text-base font-black text-slate-900">Authenticated Trips Schedule & Allocation Table</h3>
-            <p className="text-xs text-slate-500 font-semibold">
-              Showing {sortedTrips.length} of {tripsData.length} recorded trips
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:flex-initial">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search trip, bus, route..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 w-full sm:w-64 focus:ring-2 focus:ring-sky-800"
-              />
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900">
+                Descriptive Demand Estimate (4-Week Historical Average)
+              </h2>
+              <span className="text-[11px] font-semibold text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200">
+                Descriptive 4-week average; not a predictive model
+              </span>
             </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Comparison between Today's actual requests received and 4-week historical averages across T1–T10.
+            </p>
           </div>
         </div>
 
-        {sortedTrips.length === 0 ? (
-          <div className="text-center py-12 space-y-3">
-            <AlertTriangle className="w-8 h-8 text-amber-600 mx-auto" />
-            <h4 className="text-base font-black text-slate-800">No trips match the selected filter criteria</h4>
-            <p className="text-xs text-slate-500">Try loosening your date range or route selectors to view records.</p>
-            <button
-              onClick={handleResetFilters}
-              className="px-4 py-2 bg-slate-900 text-white font-bold text-xs rounded-lg hover:bg-slate-800 transition-colors"
-            >
-              Reset Filters
-            </button>
+        <div className="h-72 w-full pt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={demandComparisonChartData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis dataKey="tripId" tick={{ fontSize: 11, fill: '#64748b' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+              <Tooltip 
+                contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0', fontSize: '11px' }}
+                formatter={(val, name) => [
+                  `${val} requests`, 
+                  name === 'todayRequests' ? 'Today Requests' : (name === 'descriptive4WeekAvg' ? '4-Week Average' : 'Available Capacity')
+                ]}
+              />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+              <Bar dataKey="todayRequests" fill="#0284c7" name="Today's Requests" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="descriptive4WeekAvg" fill="#94a3b8" name="4-Week Average (Descriptive)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="availableCapacity" fill="#10b981" name="Capacity Limit" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* 5. PRIVACY-PRESERVING AGGREGATE BREAKDOWNS (HOSTEL & PURPOSE) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        {/* Hostel Aggregation */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <Building className="w-4 h-4 text-sky-600" />
+                <span>Requests Grouped by Hostel</span>
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Aggregate demand distribution across the 5 campus hostels.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400">Privacy Protected</span>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs font-bold divide-y divide-slate-200">
-              <thead className="bg-slate-100 text-slate-700">
-                <tr>
-                  <th className="p-3 text-left cursor-pointer" onClick={() => { setSortField('tripId'); setSortAsc(!sortAsc); }}>
-                    Trip ID
-                  </th>
-                  <th className="p-3 text-left cursor-pointer" onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}>
-                    Date & Departure
-                  </th>
-                  <th className="p-3 text-left">Route & Direction</th>
-                  <th className="p-3 text-left">Bus Assigned</th>
-                  <th className="p-3 text-center">Capacity</th>
-                  <th className="p-3 text-center cursor-pointer" onClick={() => { setSortField('recordedBookings'); setSortAsc(!sortAsc); }}>
-                    Recorded Bookings
-                  </th>
-                  <th className="p-3 text-center cursor-pointer" onClick={() => { setSortField('utilizationPct'); setSortAsc(!sortAsc); }}>
-                    Utilization
-                  </th>
-                  <th className="p-3 text-center">Seats Rem. / Excess</th>
-                  <th className="p-3 text-center">Risk Assessment</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {sortedTrips.slice(0, 50).map((t) => {
-                  const rem = Math.max(0, t.capacity - t.recordedBookings);
-                  return (
-                    <tr key={t.tripId} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3 font-mono font-black text-slate-900">{t.tripId}</td>
-                      <td className="p-3 text-slate-700">
-                        <div>{t.date} ({t.weekday.slice(0, 3)})</div>
-                        <div className="text-slate-500 font-mono text-[11px]">{t.departure}</div>
-                      </td>
-                      <td className="p-3">
-                        <span className="font-extrabold text-slate-900">{t.route}</span>
-                        <span className="block text-[11px] font-semibold text-slate-500 capitalize">{t.direction}</span>
-                      </td>
-                      <td className="p-3 text-slate-600 font-mono text-[11px]">{t.bus}</td>
-                      <td className="p-3 text-center text-slate-700 font-black">{t.capacity}</td>
-                      <td className="p-3 text-center">
-                        <span className="px-2 py-0.5 bg-teal-100 text-teal-900 font-black rounded">
-                          {t.recordedBookings}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center font-black text-slate-900">
-                        {t.utilizationPct}%
-                      </td>
-                      <td className="p-3 text-center">
-                        {t.excessDemand > 0 ? (
-                          <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded font-black">
-                            +{t.excessDemand} excess
-                          </span>
-                        ) : (
-                          <span className="text-slate-600 font-medium">
-                            {rem} free
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        <RiskBadge riskLevel={t.riskLevel} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {sortedTrips.length > 50 && (
-              <div className="p-3 bg-slate-50 text-center text-xs text-slate-500 font-bold border-t border-slate-200">
-                Showing top 50 records. Use filters or export CSV to examine all {sortedTrips.length} trips.
-              </div>
-            )}
+
+          <div className="h-60 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={hostelAggregates} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#64748b' }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#334155' }} />
+                <Tooltip contentStyle={{ borderRadius: '0.75rem', fontSize: '11px' }} />
+                <Bar dataKey="requests" fill="#0284c7" radius={[0, 4, 4, 0]}>
+                  {hostelAggregates.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index === 4 ? '#0284c7' : '#38bdf8'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        )}
+        </section>
+
+        {/* Reason / Purpose Aggregation */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-sky-600" />
+                <span>Requests Grouped by Purpose</span>
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Reason categories governing Stage A hierarchy sorting.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400">Strict Hierarchy</span>
+          </div>
+
+          <div className="h-60 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={purposeAggregates} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#64748b' }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#334155' }} />
+                <Tooltip contentStyle={{ borderRadius: '0.75rem', fontSize: '11px' }} />
+                <Bar dataKey="requests" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                  {purposeAggregates.map((entry, index) => (
+                    <Cell 
+                      key={`cell-purp-${index}`} 
+                      fill={entry.code === 'MEDICAL' ? '#10b981' : entry.code === 'TRAIN_CONNECTION' ? '#0284c7' : '#94a3b8'} 
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
       </div>
+
+      {/* 6. FULL AUDIT LOG & MANUAL OVERRIDE (ACTIVE TRIP AUDIT) */}
+      <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900">
+                Allocation Audit Manifest for Trip {activeTripData.tripId} ({activeTripData.departureTime})
+              </h2>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                {activeTripData.capacity.plateNumber}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Available Places: <strong className="text-slate-800">{activeTripData.capacity.totalAvailable}</strong> (50 seated + 8 standing) • 
+              Total Requests: <strong className="text-slate-800">{activeTripData.totalRequests}</strong> • 
+              Allocated: <strong className="text-emerald-700">{activeTripData.allocatedCount}</strong> • 
+              Waitlisted: <strong className="text-rose-600">{activeTripData.waitlistedCount}</strong>
+            </p>
+          </div>
+
+          <div className="text-xs font-medium text-slate-500">
+            Click "Manual Override" to reallocate with required audit justification.
+          </div>
+        </div>
+
+        {/* Audit Manifest Table */}
+        <div className="overflow-x-auto max-h-96 overflow-y-auto border border-slate-200 rounded-xl">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead className="sticky top-0 bg-slate-50 z-10 text-slate-700 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
+              <tr>
+                <th className="py-2.5 px-3">Rank</th>
+                <th className="py-2.5 px-3">MIS Number</th>
+                <th className="py-2.5 px-3">Hostel & Program</th>
+                <th className="py-2.5 px-3">Reason Category</th>
+                <th className="py-2.5 px-3">A11y / Standing</th>
+                <th className="py-2.5 px-3">Score</th>
+                <th className="py-2.5 px-3">Outcome</th>
+                <th className="py-2.5 px-3">Assigned Place</th>
+                <th className="py-2.5 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {[...activeTripData.solution.allocated, ...activeTripData.solution.waitlisted].map((cand, idx) => (
+                <tr 
+                  key={cand.misNumber}
+                  className={`hover:bg-slate-50 transition-colors ${
+                    cand.status === 'ALLOCATED' ? 'bg-white' : 'bg-rose-50/20'
+                  }`}
+                >
+                  <td className="py-2.5 px-3 font-mono font-bold text-slate-700">
+                    #{cand.rank}
+                  </td>
+                  <td className="py-2.5 px-3 font-mono text-slate-800">
+                    {cand.misNumber}
+                  </td>
+                  <td className="py-2.5 px-3 text-slate-600">
+                    {cand.hostel} • {cand.course} {cand.branch}
+                  </td>
+                  <td className="py-2.5 px-3">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      cand.tripReason === 'MEDICAL' 
+                        ? 'bg-emerald-100 text-emerald-800' 
+                        : cand.tripReason === 'TRAIN_CONNECTION'
+                          ? 'bg-sky-100 text-sky-800'
+                          : cand.tripReason === 'EXAM'
+                            ? 'bg-purple-100 text-purple-800'
+                            : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {cand.tripReason}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3 text-[11px]">
+                    {cand.declaredAccessibilityNeed && (
+                      <span className="text-emerald-700 font-bold block">A11y Need (Rule 1)</span>
+                    )}
+                    <span className={cand.canStand ? 'text-slate-500' : 'text-amber-700 font-medium'}>
+                      {cand.canStand ? 'Can Stand' : 'Seated Only'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                    {cand.calculatedScore}
+                  </td>
+                  <td className="py-2.5 px-3 font-bold">
+                    {cand.status === 'ALLOCATED' ? (
+                      <span className="text-emerald-700 flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Allocated</span>
+                      </span>
+                    ) : (
+                      <span className="text-rose-600 font-semibold">
+                        Waitlisted #{cand.waitlistPosition || cand.rank - activeTripData.capacity.totalAvailable}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                    {cand.allocatedSpot || '—'}
+                  </td>
+                  <td className="py-2.5 px-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenOverride(cand)}
+                      className="px-2 py-1 rounded bg-slate-100 hover:bg-sky-100 text-slate-700 hover:text-sky-800 text-[11px] font-semibold transition-colors"
+                    >
+                      Override
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Audit Log Historical Trace Table */}
+        <div className="pt-3 border-t border-slate-100">
+          <div className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-sky-600" />
+            <span>Administrative Override & Reallocation Audit Trail</span>
+          </div>
+          <div className="space-y-2">
+            {auditLogHistory.map(entry => (
+              <div 
+                key={entry.id}
+                className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-slate-400">{entry.id}</span>
+                    <strong className="text-slate-800">MIS {entry.misNumber} (Trip {entry.tripId})</strong>
+                    <span className="text-sky-700 font-medium">• {entry.newStatus}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    <strong>Rule:</strong> {entry.ruleApplied} | <strong>Reason:</strong> {entry.auditNote}
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono text-right">
+                  {new Date(entry.timestamp).toLocaleTimeString()} IST
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </section>
+
+      {/* 7. MANUAL OVERRIDE MODAL */}
+      {overrideModalOpen && selectedCandidateForOverride && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Manual Allocation Override
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Student MIS: {selectedCandidateForOverride.misNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOverrideModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteOverride} className="p-6 space-y-4 text-xs">
+              {overrideSuccessMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-medium">
+                  {overrideSuccessMsg}
+                </div>
+              )}
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <div>Candidate: <strong>{selectedCandidateForOverride.fullName}</strong></div>
+                <div>Current Status: <strong>{selectedCandidateForOverride.status}</strong></div>
+                <div>Trip Reason: <strong>{selectedCandidateForOverride.tripReason}</strong></div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Mandatory Audit Justification Note <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={overrideAuditNote}
+                  onChange={(e) => setOverrideAuditNote(e.target.value)}
+                  placeholder="e.g. Authorized by Dean of Student Affairs for urgent medical appointment at Talegaon Hospital..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500 outline-none text-xs"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setOverrideModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-xs"
+                >
+                  Confirm & Log Override
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

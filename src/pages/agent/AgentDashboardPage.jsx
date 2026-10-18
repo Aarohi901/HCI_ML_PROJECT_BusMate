@@ -23,7 +23,9 @@ import {
   BarChart3,
   Layers,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  Scale
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -47,6 +49,8 @@ import {
   getPassengerFlow, 
   getTrips 
 } from '../../services/predictionService';
+import { ShuttleDecisionBoard } from '../../components/agent/ShuttleDecisionBoard';
+import { PassengerABEvaluationDashboard } from '../../components/agent/PassengerABEvaluationDashboard';
 import { useAccessibility } from '../../context/AccessibilityContext';
 import { A11yModal } from '../../components/accessibility/A11yModal';
 import { A11yFloatingBadge } from '../../components/accessibility/A11yFloatingBadge';
@@ -59,8 +63,16 @@ const AgentDashboardContent = () => {
     document.title = 'BusMate — Staff & Agent ML Operations Portal';
   }, []);
 
-  // Navigation tab state
-  const [activeTab, setActiveTab] = useState('demand'); // 'demand' | 'traffic' | 'passengers' | 'fleet'
+  // Navigation tab state (defaults to primary XAI Decision Board, supports ?tab=evaluation)
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const tabParam = p.get('tab');
+      if (tabParam === 'evaluation' || tabParam === 'research') return 'evaluation';
+      if (['xai', 'demand', 'traffic', 'passengers', 'fleet'].includes(tabParam)) return tabParam;
+    }
+    return 'xai';
+  });
 
   // Module 1 controls
   const [selectedRoute, setSelectedRoute] = useState('LINE_HINJ_STN');
@@ -267,6 +279,34 @@ const AgentDashboardContent = () => {
         <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800 scrollbar-none">
           <button
             type="button"
+            id="tab-xai-decision-board"
+            onClick={() => setActiveTab('xai')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black tracking-wide whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'xai'
+                ? 'bg-sky-500 text-slate-950 shadow-md font-bold'
+                : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>⚡ Shuttle Allocation Decision Board (XAI & A/B Eval)</span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-passenger-evaluation"
+            onClick={() => setActiveTab('evaluation')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black tracking-wide whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'evaluation'
+                ? 'bg-sky-500 text-slate-950 shadow-md font-bold'
+                : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Scale className="w-4 h-4" />
+            <span>🔬 Research & Evaluation (Passenger A/B Study)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('demand')}
             className={`px-4 py-2.5 rounded-xl text-xs font-semibold tracking-wide whitespace-nowrap transition-all flex items-center gap-2 ${
               activeTab === 'demand'
@@ -317,6 +357,20 @@ const AgentDashboardContent = () => {
             <span>Module 4: Fleet & Transit Utilities Overview</span>
           </button>
         </div>
+
+        {/* ========================================================= */}
+        {/* PRIMARY: SHUTTLE ALLOCATION DECISION BOARD & HCI A/B HARNESS */}
+        {/* ========================================================= */}
+        {activeTab === 'xai' && (
+          <ShuttleDecisionBoard />
+        )}
+
+        {/* ========================================================= */}
+        {/* PASSENGER ALLOCATION EXPLANATIONS & TRANSPARENCY A/B STUDY */}
+        {/* ========================================================= */}
+        {activeTab === 'evaluation' && (
+          <PassengerABEvaluationDashboard />
+        )}
 
         {/* ========================================================= */}
         {/* MODULE 1: BUS DEMAND & CAPACITY FORECASTING */}

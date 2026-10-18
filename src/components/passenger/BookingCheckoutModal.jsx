@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import { useAccessibility } from '../../context/AccessibilityContext';
 import { useTranslation } from '../../context/TranslationContext';
+import { useAuth } from '../../context/AuthContext';
+import { PassengerDetailsForm } from './PassengerDetailsForm';
+import { calculatePriorityScore, isReservedPrioritySeat, TRIP_PURPOSES } from '../../utils/priorityScoring';
 
 export const BookingCheckoutModal = ({ 
   reservationData, 
@@ -26,6 +29,7 @@ export const BookingCheckoutModal = ({
 }) => {
   const { announce } = useAccessibility();
   const { t } = useTranslation();
+  const { user } = useAuth();
 
   // 10-minute locking countdown timer
   const [secondsRemaining, setSecondsRemaining] = useState(600); // 10 minutes
@@ -52,6 +56,9 @@ export const BookingCheckoutModal = ({
     `idemp_sb_live_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
   );
 
+  // Error message for backend 422 rejections
+  const [errorMsg, setErrorMsg] = useState('');
+
   // Initialize passenger list based on reserved seats
   useEffect(() => {
     if (reservationData?.seats) {
@@ -60,8 +67,10 @@ export const BookingCheckoutModal = ({
           seatId: seat.id,
           deck: seat.deck,
           name: index === 0 ? 'Alex Rivera' : `Passenger ${index + 1}`,
-          age: index === 0 ? 24 : 22,
-          gender: 'Female'
+          age: index === 0 ? (reservationData?.passengerAge || 24) : 22,
+          gender: 'Female',
+          tripPurpose: index === 0 ? (reservationData?.tripPurpose || 'GENERAL_LEISURE') : 'GENERAL_LEISURE',
+          isDivyang: index === 0 ? Boolean(reservationData?.isDivyang) : false
         }))
       );
     }
@@ -129,50 +138,88 @@ export const BookingCheckoutModal = ({
   const gstTax = Math.round(taxableSubtotal * 0.05); // 5% Transit GST
   const finalTotal = taxableSubtotal + gstTax;
 
-  // Sandbox Payment Submission
-  const handlePayment = (e) => {
+  // Sandbox Payment Submission with anti-spoofing revalidation
+  const handlePayment = async (e) => {
     e.preventDefault();
     if (timerExpired) return;
 
+    setErrorMsg('');
     setIsProcessing(true);
     announce('Processing simulated payment transaction...');
 
+    const primaryPassenger = passengers[0] || {};
+    const primaryAge = Number(primaryPassenger.age) || reservationData?.passengerAge || 24;
+    const primaryPurpose = primaryPassenger.tripPurpose || reservationData?.tripPurpose || 'GENERAL_LEISURE';
+    const primaryDivyang = Boolean(primaryPassenger.isDivyang ?? reservationData?.isDivyang);
+
+    const priorityResult = calculatePriorityScore({
+      age: primaryAge,
+      tripPurpose: primaryPurpose,
+      isDivyang: primaryDivyang
+    });
+
+    const hasPrioritySeat = seats.some(s => isReservedPrioritySeat(typeof s === 'string' ? s : s.id));
+
+    const pnrNumber = 'PNR-' + Math.floor(Math.random() * 899999 + 100000);
+    const bookingRecord = {
+      pnr: pnrNumber,
+      busId: bus.id,
+      routeNumber: bus.routeNumber,
+      busPlate: bus.busPlate || 'MH 14 BT 3312',
+      operator: 'SmartBus Express Transit',
+      origin: bus.origin,
+      destination: bus.destination,
+      boardingPoint: boarding?.name,
+      boardingTime: boarding?.time,
+      droppingPoint: dropping?.name,
+      droppingTime: dropping?.time,
+      seats: seats.map(s => (typeof s === 'string' ? s : s.id)),
+      passengers,
+      // Priority allocation fields
+      tripPurpose: primaryPurpose,
+      priorityScore: priorityResult.score,
+      isPrioritySeat: hasPrioritySeat,
+      isHighPriority: priorityResult.isHighPriority,
+      contactEmail,
+      contactPhone,
+      fareBreakdown: {
+        baseFare: totalBaseFare,
+        discount: discountAmount,
+        gst: gstTax,
+        total: finalTotal
+      },
+      idempotencyToken,
+      bookingDate: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
+      status: 'Confirmed'
+    };
+
+    try {
+      const confirmResponse = await fetch('/api/bookings/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingRecord)
+      });
+
+      if (confirmResponse.status === 422) {
+        const errorData = await confirmResponse.json().catch(() => ({}));
+        setErrorMsg(errorData.message || 'Priority seating validation failed: Insufficient score.');
+        setIsProcessing(false);
+        announce('Booking rejected: Insufficient priority eligibility.');
+        return;
+      }
+    } catch (err) {
+      console.warn('[SmartBus] Confirmation error caught:', err);
+    }
+
+    // Save to localStorage
+    const existing = JSON.parse(localStorage.getItem('smartbus_my_trips') || '[]');
+    localStorage.setItem('smartbus_my_trips', JSON.stringify([bookingRecord, ...existing]));
+    sessionStorage.setItem('smartbus_last_booking', JSON.stringify(bookingRecord));
+
     setTimeout(() => {
-      const pnrNumber = 'PNR-' + Math.floor(Math.random() * 899999 + 100000);
-      const bookingRecord = {
-        pnr: pnrNumber,
-        busId: bus.id,
-        routeNumber: bus.routeNumber,
-        busPlate: bus.busPlate || 'MH 14 BT 3312',
-        operator: 'SmartBus Express Transit',
-        origin: bus.origin,
-        destination: bus.destination,
-        boardingPoint: boarding?.name,
-        boardingTime: boarding?.time,
-        droppingPoint: dropping?.name,
-        droppingTime: dropping?.time,
-        seats: seats.map(s => s.id),
-        passengers,
-        contactEmail,
-        contactPhone,
-        fareBreakdown: {
-          baseFare: totalBaseFare,
-          discount: discountAmount,
-          gst: gstTax,
-          total: finalTotal
-        },
-        idempotencyToken,
-        bookingDate: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
-        status: 'Confirmed'
-      };
-
-      // Save to localStorage
-      const existing = JSON.parse(localStorage.getItem('smartbus_my_trips') || '[]');
-      localStorage.setItem('smartbus_my_trips', JSON.stringify([bookingRecord, ...existing]));
-
       setIsProcessing(false);
       onBookingSuccess(bookingRecord);
-    }, 1500);
+    }, 1200);
   };
 
   return (
@@ -230,6 +277,21 @@ export const BookingCheckoutModal = ({
           </span>
         </div>
 
+        {/* 422 Priority Validation Rejection Alert */}
+        {errorMsg && (
+          <div 
+            id="checkout-modal-error-banner"
+            className="p-4 bg-red-50 border-2 border-red-400 text-red-900 rounded-2xl flex items-center gap-3 animate-in fade-in"
+            role="alert"
+          >
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <span className="font-bold text-xs block">Priority Allocation Error (HTTP 422)</span>
+              <span className="text-xs font-medium">{errorMsg}</span>
+            </div>
+          </div>
+        )}
+
         {timerExpired ? (
           <div className="text-center py-6 space-y-3">
             <button
@@ -251,52 +313,22 @@ export const BookingCheckoutModal = ({
                 <span data-i18n="passengerDetails">{t('passengerDetails')}</span>
               </h3>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {passengers.map((p, idx) => (
-                  <div key={p.seatId} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                    <div className="sm:col-span-3">
-                      <span className="text-[10px] font-black text-slate-400 uppercase block">Seat Assigned</span>
-                      <span className="font-black text-sm text-[#075985]">Seat {p.seatId} ({p.deck} deck)</span>
-                    </div>
-
-                    <div className="sm:col-span-4">
-                      <input
-                        type="text"
-                        required
-                        data-i18n-placeholder="fullName"
-                        placeholder={t('fullName')}
-                        value={p.name}
-                        onChange={(e) => updatePassenger(idx, 'name', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-[#075985]"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <input
-                        type="number"
-                        required
-                        min="5"
-                        max="99"
-                        data-i18n-placeholder="age"
-                        placeholder={t('age')}
-                        value={p.age}
-                        onChange={(e) => updatePassenger(idx, 'age', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-[#075985]"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-3">
-                      <select
-                        value={p.gender}
-                        onChange={(e) => updatePassenger(idx, 'gender', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-[#075985]"
-                      >
-                        <option value="Female">{t('female')}</option>
-                        <option value="Male">{t('male')}</option>
-                        <option value="Other">{t('other')}</option>
-                      </select>
-                    </div>
-                  </div>
+                  <PassengerDetailsForm
+                    key={p.seatId || idx}
+                    passengerIndex={idx}
+                    passenger={p}
+                    studentProfile={user}
+                    selectedTrip={bus}
+                    onChange={(updated) => {
+                      setPassengers(prev => {
+                        const copy = [...prev];
+                        copy[idx] = updated;
+                        return copy;
+                      });
+                    }}
+                  />
                 ))}
               </div>
 

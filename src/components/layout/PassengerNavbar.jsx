@@ -41,6 +41,7 @@ export const PassengerNavbar = () => {
 
   const isActive = (path) => {
     if (path === '/') return location.pathname === '/';
+    if (path === '/my-trips') return location.pathname === '/my-trips' || location.pathname === '/history';
     return location.pathname.startsWith(path);
   };
 
@@ -67,8 +68,8 @@ export const PassengerNavbar = () => {
                   <span className="text-2xl font-bold font-heading text-slate-900 tracking-[-0.02em] leading-none">
                     Bus<span className="text-[#075985]">Mate</span>
                   </span>
-                  <span className="text-[10px] font-semibold text-slate-500 tracking-[0.05em] uppercase mt-0.5">
-                    Pune City Transit
+                  <span className="text-[10px] font-semibold text-sky-700 tracking-[0.05em] uppercase mt-0.5 font-mono">
+                    IIIT Pune Campus Shuttle
                   </span>
                 </div>
               </Link>
@@ -206,14 +207,14 @@ export const PassengerNavbar = () => {
                             <span data-i18n="nav.my_bookings">{t('nav.my_bookings')}</span>
                           </Link>
                           <Link
-                            to="/agent"
-                            id="agent-portal-dropdown-link"
+                            to="/admin"
+                            id="admin-dashboard-dropdown-link"
                             onClick={() => setAccountMenuOpen(false)}
                             className="w-full px-4 py-2 text-left text-xs font-medium text-slate-700 hover:bg-sky-50 hover:text-[#075985] flex items-center gap-2.5"
                             role="menuitem"
                           >
-                            <Cpu className="w-4 h-4 text-slate-400" />
-                            <span data-i18n="nav.agent_portal">{t('nav.agent_portal')}</span>
+                            <ShieldCheck className="w-4 h-4 text-slate-400" />
+                            <span>Admin Portal (Rule-Based)</span>
                           </Link>
                         </div>
 
@@ -244,17 +245,6 @@ export const PassengerNavbar = () => {
                   </button>
                 )}
               </div>
-
-              {/* Agent Portal Direct Navigation */}
-              <Link
-                to="/agent"
-                id="agent-portal-nav-link"
-                className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-slate-900 cursor-pointer"
-                title="Go to Agent & ML Operations Portal"
-              >
-                <Cpu className="w-4 h-4 text-sky-400" aria-hidden="true" />
-                <span data-i18n="agentPortal">{t('agentPortal')}</span>
-              </Link>
 
               {/* Accessibility Engine Trigger Button ("Accessibility" ♿) */}
               <button
@@ -344,15 +334,6 @@ export const PassengerNavbar = () => {
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-              <Link
-                to="/agent"
-                id="agent-portal-mobile-link"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full py-2.5 bg-slate-900 text-white text-xs font-semibold rounded-xl text-center flex items-center justify-center gap-2"
-              >
-                <Cpu className="w-4 h-4 text-sky-400" />
-                <span data-i18n="agentPortal">{t('agentPortal')}</span>
-              </Link>
               <button
                 type="button"
                 onClick={() => {

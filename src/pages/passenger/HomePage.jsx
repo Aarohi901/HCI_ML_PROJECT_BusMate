@@ -8,9 +8,7 @@ import {
 } from 'lucide-react';
 import busesData from '../../data/buses.json';
 import { BusSearchRibbon } from '../../components/passenger/BusSearchRibbon';
-import { OffersStrip } from '../../components/passenger/OffersStrip';
 import { PopularRoutesStrip } from '../../components/passenger/PopularRoutesStrip';
-import { TrustIndicators } from '../../components/passenger/TrustIndicators';
 import { BusSearchResults } from '../../components/passenger/BusSearchResults';
 import { DeckSeatPicker } from '../../components/passenger/DeckSeatPicker';
 import { BookingCheckoutModal } from '../../components/passenger/BookingCheckoutModal';
@@ -24,8 +22,8 @@ export const HomePage = () => {
   const { t } = useTranslation();
 
   // Read URL query params or fallback to defaults
-  const fromQuery = urlParams.get('from') || 'Swargate, Pune';
-  const toQuery = urlParams.get('to') || 'Railway Station, Pune';
+  const fromQuery = urlParams.get('from') || 'IIIT Pune Campus (Main Gate)';
+  const toQuery = urlParams.get('to') || 'Godavari Boys Hostel (Off-Campus Terminus & Railway Station Connection Point)';
   const dateQuery = urlParams.get('date') || new Date().toISOString().split('T')[0];
 
   // Search parameters state
@@ -150,15 +148,8 @@ export const HomePage = () => {
 
       {/* 3. Quick Utility & Value Banners */}
       <div className="px-4 sm:px-6 lg:px-8 space-y-10 sm:space-y-12">
-        
-        {/* Active Commuter Offers Strip */}
-        <OffersStrip />
-
         {/* Popular Commuter Routes Strip */}
         <PopularRoutesStrip onSelectRoute={handleSelectPopularRoute} />
-
-        {/* Trust Indicators */}
-        <TrustIndicators />
 
         {/* Featured Daily Transit Fleet (Zero ML contamination, Pure passenger cards) */}
         {!hasSearched && (

@@ -4,6 +4,8 @@ import authRoutes from './routes/authRoutes.js';
 import busRoutes from './routes/busRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import transitRoutes from './routes/transitRoutes.js';
+import agentRoutes from './routes/agentRoutes.js';
+import evaluationRoutes from './routes/evaluationRoutes.js';
 import { getRoutes, searchBuses } from './controllers/busController.js';
 import {
   getHealth,
@@ -29,6 +31,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/buses', busRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/transit', transitRoutes);
+app.use('/api/agent', agentRoutes);
+app.use('/api/evaluations', evaluationRoutes);
 
 // Legacy Root API endpoints for backwards compatibility with tests and services
 app.get('/api/routes', getRoutes);

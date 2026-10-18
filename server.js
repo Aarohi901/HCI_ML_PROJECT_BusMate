@@ -13,6 +13,8 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import agentRoutes from './server/src/routes/agentRoutes.js';
+import { calculatePriorityScore, isReservedPrioritySeat } from './server/src/utils/priorityScoring.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +24,7 @@ const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/agent', agentRoutes);
 
 // Load data artifacts from src/data/
 const routesPath = path.join(__dirname, 'src', 'data', 'routes.json');
@@ -261,13 +264,35 @@ app.post('/api/allocate', (req, res) => {
 const activeSeatHolds = new Map();
 
 app.post('/api/bookings/hold', (req, res) => {
-  const { busId, seats, boarding, dropping, totalBaseFare } = req.body;
+  const { busId, seats, boarding, dropping, totalBaseFare, tripPurpose, age, isDivyang, passengers } = req.body;
 
   if (!busId || !seats || !Array.isArray(seats) || seats.length === 0) {
     return res.status(400).json({
       success: false,
       error: 'Bad Request',
       message: 'Missing required parameters. At least 1 seat and busId are required.'
+    });
+  }
+
+  // Anti-spoofing check for priority seats
+  const hasPrioritySeat = seats.some(s => isReservedPrioritySeat(s));
+  const primaryAge = age || passengers?.[0]?.age || 25;
+  const primaryPurpose = tripPurpose || passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+  const primaryDivyang = isDivyang ?? passengers?.[0]?.isDivyang ?? false;
+
+  const priorityResult = calculatePriorityScore({
+    age: primaryAge,
+    tripPurpose: primaryPurpose,
+    isDivyang: primaryDivyang
+  });
+
+  if (hasPrioritySeat && !priorityResult.isHighPriority && priorityResult.score < 70) {
+    return res.status(422).json({
+      success: false,
+      error: 'PrioritySeatingEligibilityError',
+      message: `Selected seat is reserved for passengers traveling for medical needs, senior citizens (60+), or persons with reduced mobility. Your calculated priority score is ${priorityResult.score} (requires 70+). Please select a general seat or update your travel purpose.`,
+      score: priorityResult.score,
+      requiredScore: 70
     });
   }
 
@@ -278,6 +303,8 @@ app.post('/api/bookings/hold', (req, res) => {
     seats,
     boarding: boarding || null,
     dropping: dropping || null,
+    tripPurpose: primaryPurpose,
+    priorityScore: priorityResult.score,
     totalBaseFare: totalBaseFare || 0,
     createdAt: new Date().toISOString(),
     expiresInSeconds: 600,
@@ -297,15 +324,40 @@ app.post('/api/bookings/hold', (req, res) => {
 
 // 9. Booking Confirmation Endpoint: POST /api/bookings/confirm
 app.post('/api/bookings/confirm', (req, res) => {
-  const { holdId, busId, seats, passengers, contactEmail, contactPhone, idempotencyToken, paymentMethod, fareBreakdown } = req.body;
+  const { holdId, busId, seats, passengers, tripPurpose, age, isDivyang, contactEmail, contactPhone, idempotencyToken, paymentMethod, fareBreakdown } = req.body;
+
+  const seatsToBook = seats || [];
+  const hasPrioritySeat = seatsToBook.some(s => isReservedPrioritySeat(s));
+  const primaryAge = age || passengers?.[0]?.age || 25;
+  const primaryPurpose = tripPurpose || passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+  const primaryDivyang = isDivyang ?? passengers?.[0]?.isDivyang ?? false;
+
+  const priorityResult = calculatePriorityScore({
+    age: primaryAge,
+    tripPurpose: primaryPurpose,
+    isDivyang: primaryDivyang
+  });
+
+  if (hasPrioritySeat && !priorityResult.isHighPriority && priorityResult.score < 70) {
+    return res.status(422).json({
+      success: false,
+      error: 'PrioritySeatingEligibilityError',
+      message: `Selected seat is reserved for passengers traveling for medical needs, senior citizens (60+), or persons with reduced mobility. Your calculated priority score is ${priorityResult.score} (requires 70+). Please select a general seat or update your travel purpose.`,
+      score: priorityResult.score,
+      requiredScore: 70
+    });
+  }
 
   const pnrNumber = 'PNR-' + Math.floor(Math.random() * 899999 + 100000);
   const confirmedBooking = {
     pnr: pnrNumber,
     holdId: holdId || null,
     busId: busId || 'SB-01',
-    seats: seats || [],
+    seats: seatsToBook,
     passengers: passengers || [],
+    tripPurpose: primaryPurpose,
+    priorityScore: priorityResult.score,
+    isPrioritySeat: hasPrioritySeat,
     contactEmail: contactEmail || 'commuter@smartbus.gov.in',
     contactPhone: contactPhone || '+91 98765 43210',
     fareBreakdown: fareBreakdown || { total: 50 },
@@ -325,6 +377,62 @@ app.post('/api/bookings/confirm', (req, res) => {
     message: 'Ticket confirmed and booked successfully.',
     pnr: pnrNumber,
     booking: confirmedBooking
+  });
+});
+
+// Evaluation telemetry endpoints
+const userEvaluationsFilePath = path.join(__dirname, 'src/data/user_evaluations.json');
+let userEvalsCache = [];
+try {
+  if (fs.existsSync(userEvaluationsFilePath)) {
+    userEvalsCache = JSON.parse(fs.readFileSync(userEvaluationsFilePath, 'utf-8'));
+  }
+} catch (e) {
+  console.warn('Could not read user_evaluations.json in server.js:', e);
+}
+
+app.post('/api/evaluations', (req, res) => {
+  const newRecord = {
+    id: `peval_${Date.now()}_${Math.floor(Math.random() * 900 + 100)}`,
+    userId: req.body.userId || `usr_${Math.floor(Math.random() * 9000 + 1000)}`,
+    group: (req.body.group || 'B').toUpperCase(),
+    status: (req.body.status || 'CONFIRMED').toUpperCase(),
+    tripPurpose: req.body.tripPurpose || 'GENERAL_LEISURE',
+    seatNumber: req.body.seatNumber || null,
+    understandingScore: Number(req.body.understandingScore) || 3,
+    understandingText: req.body.understandingText || 'Very Clear',
+    fairnessScore: Number(req.body.fairnessScore) || 5,
+    isFair: Boolean(req.body.isFair !== false && Number(req.body.fairnessScore) >= 3),
+    acceptedReallocation: req.body.acceptedReallocation !== undefined ? Boolean(req.body.acceptedReallocation) : null,
+    timestamp: req.body.timestamp || new Date().toISOString()
+  };
+  userEvalsCache.unshift(newRecord);
+  try {
+    fs.writeFileSync(userEvaluationsFilePath, JSON.stringify(userEvalsCache, null, 2), 'utf-8');
+  } catch (err) {}
+  res.status(201).json({ success: true, evaluation: newRecord });
+});
+
+app.get('/api/evaluations', (req, res) => {
+  const groupA = userEvalsCache.filter(r => r.group === 'A');
+  const groupB = userEvalsCache.filter(r => r.group === 'B');
+  const calcFairnessRate = (arr) => arr.length ? Math.round((arr.filter(r => r.isFair || r.fairnessScore >= 4).length / arr.length) * 1000) / 10 : 0;
+  const calcAcceptanceRate = (arr) => {
+    const realloc = arr.filter(r => r.status === 'REALLOCATED');
+    return realloc.length ? Math.round((realloc.filter(r => r.acceptedReallocation === true).length / realloc.length) * 1000) / 10 : 100;
+  };
+  res.json({
+    success: true,
+    metrics: {
+      total_evaluations: userEvalsCache.length,
+      group_A_count: groupA.length,
+      group_B_count: groupB.length,
+      group_A_fairness_rate_pct: calcFairnessRate(groupA),
+      group_B_fairness_rate_pct: calcFairnessRate(groupB),
+      group_A_acceptance_rate_pct: calcAcceptanceRate(groupA),
+      group_B_acceptance_rate_pct: calcAcceptanceRate(groupB)
+    },
+    evaluations: userEvalsCache
   });
 });
 

@@ -1,4 +1,5 @@
 import prisma from '../config/db.js';
+import { calculatePriorityScore, isReservedPrioritySeat } from '../utils/priorityScoring.js';
 
 // In-memory hold store for fallback
 const activeSeatHolds = new Map();
@@ -6,7 +7,7 @@ const fallbackBookings = [];
 
 export const holdSeats = async (req, res, next) => {
   try {
-    const { busId, tripId, seats, boarding, dropping, totalBaseFare } = req.body;
+    const { busId, tripId, seats, boarding, dropping, totalBaseFare, tripPurpose, age, isDivyang, passengers } = req.body;
     const targetTripId = tripId || busId;
 
     if (!targetTripId || !seats || !Array.isArray(seats) || seats.length === 0) {
@@ -14,6 +15,28 @@ export const holdSeats = async (req, res, next) => {
         success: false,
         error: 'ValidationError',
         message: 'A valid tripId/busId and at least one seat are required.'
+      });
+    }
+
+    // Revalidate Priority Seating Eligibility (Anti-Spoofing Check)
+    const hasPrioritySeat = seats.some(s => isReservedPrioritySeat(s));
+    const primaryAge = age || passengers?.[0]?.age || 25;
+    const primaryPurpose = tripPurpose || passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+    const primaryDivyang = isDivyang ?? passengers?.[0]?.isDivyang ?? false;
+
+    const priorityResult = calculatePriorityScore({
+      age: primaryAge,
+      tripPurpose: primaryPurpose,
+      isDivyang: primaryDivyang
+    });
+
+    if (hasPrioritySeat && !priorityResult.isHighPriority && priorityResult.score < 70) {
+      return res.status(422).json({
+        success: false,
+        error: 'PrioritySeatingEligibilityError',
+        message: `Selected seat is reserved for passengers traveling for medical needs, senior citizens (60+), or persons with reduced mobility. Your calculated priority score is ${priorityResult.score} (requires 70+). Please select a general seat or update your travel details if traveling for an emergency.`,
+        score: priorityResult.score,
+        requiredScore: 70
       });
     }
 
@@ -116,13 +139,22 @@ export const confirmBooking = async (req, res, next) => {
       tripId,
       seats,
       passengers,
+      tripPurpose,
+      age,
+      isDivyang,
       contactEmail,
       contactPhone,
       boardingPoint,
       droppingPoint,
       paymentMethod,
       fareBreakdown,
-      totalAmount
+      totalAmount,
+      isFlexible,
+      flexibleWindowMinutes,
+      flexibilityDirection,
+      wasReallocated,
+      reallocatedBus,
+      status
     } = req.body;
 
     const targetTripId = tripId || busId || 'SB-01';
@@ -130,6 +162,33 @@ export const confirmBooking = async (req, res, next) => {
     const pnr = 'PNR-' + Math.floor(Math.random() * 899999 + 100000);
     const seatsToBook = Array.isArray(seats) ? seats : [];
     const calculatedTotal = totalAmount || fareBreakdown?.total || 50;
+
+    // Server-side Anti-Spoofing Check for Priority Seating
+    const hasPrioritySeat = seatsToBook.some(s => isReservedPrioritySeat(s));
+    const primaryAge = age || passengers?.[0]?.age || 25;
+    const primaryPurpose = tripPurpose || passengers?.[0]?.tripPurpose || 'GENERAL_LEISURE';
+    const primaryDivyang = isDivyang ?? passengers?.[0]?.isDivyang ?? false;
+
+    const priorityResult = calculatePriorityScore({
+      age: primaryAge,
+      tripPurpose: primaryPurpose,
+      isDivyang: primaryDivyang
+    });
+
+    const isFlexibleOptIn = Boolean(isFlexible ?? passengers?.[0]?.isFlexible ?? false);
+    const flexWindow = Number(flexibleWindowMinutes ?? passengers?.[0]?.flexibleWindowMinutes) || (isFlexibleOptIn ? 30 : 0);
+    const flexDir = flexibilityDirection || passengers?.[0]?.flexibilityDirection || 'ANY';
+    const isReallocatedBooking = Boolean(wasReallocated ?? (status === 'REALLOCATED'));
+
+    if (hasPrioritySeat && !priorityResult.isHighPriority && priorityResult.score < 70) {
+      return res.status(422).json({
+        success: false,
+        error: 'PrioritySeatingEligibilityError',
+        message: `Selected seat is reserved for passengers traveling for medical needs, senior citizens (60+), or persons with reduced mobility. Your calculated priority score is ${priorityResult.score} (requires 70+). Please select a general seat or update your travel purpose.`,
+        score: priorityResult.score,
+        requiredScore: 70
+      });
+    }
 
     if (prisma) {
       try {
@@ -149,6 +208,14 @@ export const confirmBooking = async (req, res, next) => {
                 tripId: trip.id,
                 userId,
                 passengerDetails: JSON.stringify(passengers || []),
+                tripPurpose: primaryPurpose,
+                priorityScore: priorityResult.score,
+                isPrioritySeat: hasPrioritySeat,
+                isFlexible: isFlexibleOptIn,
+                flexibleWindowMinutes: flexWindow,
+                flexibilityDirection: flexDir,
+                wasReallocated: isReallocatedBooking,
+                reallocatedBus: reallocatedBus || null,
                 contactEmail: contactEmail || 'commuter@smartbus.gov.in',
                 contactPhone: contactPhone || '+91 98765 43210',
                 boardingPoint: boardingPoint || 'Main Station',
@@ -158,7 +225,7 @@ export const confirmBooking = async (req, res, next) => {
                 totalAmount: parseFloat(calculatedTotal),
                 paymentMethod: paymentMethod || 'UPI',
                 paymentStatus: 'PAID',
-                status: 'CONFIRMED'
+                status: isReallocatedBooking ? 'REALLOCATED' : 'CONFIRMED'
               },
               include: { trip: { include: { route: true } } }
             }),
@@ -185,6 +252,9 @@ export const confirmBooking = async (req, res, next) => {
               departureDate: booking.trip?.departureDate,
               seats: seatsToBook,
               passengers: passengers || [],
+              tripPurpose: booking.tripPurpose,
+              priorityScore: booking.priorityScore,
+              isPrioritySeat: booking.isPrioritySeat,
               contactEmail: booking.contactEmail,
               contactPhone: booking.contactPhone,
               boardingPoint: booking.boardingPoint,
@@ -222,6 +292,14 @@ export const confirmBooking = async (req, res, next) => {
       departureDate: new Date().toISOString().split('T')[0],
       seats: seatsToBook,
       passengers: passengers || [],
+      tripPurpose: primaryPurpose,
+      priorityScore: priorityResult.score,
+      isPrioritySeat: hasPrioritySeat,
+      isFlexible: isFlexibleOptIn,
+      flexibleWindowMinutes: flexWindow,
+      flexibilityDirection: flexDir,
+      wasReallocated: isReallocatedBooking,
+      reallocatedBus: reallocatedBus || null,
       contactEmail: contactEmail || 'commuter@smartbus.gov.in',
       contactPhone: contactPhone || '+91 98765 43210',
       boardingPoint: boardingPoint || 'Swargate Terminal Gate 2',
